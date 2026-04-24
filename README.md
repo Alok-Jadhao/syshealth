@@ -17,7 +17,6 @@
 * [Project Structure](#-project-structure)
 * [Configuration](#-configuration)
 * [API Reference](#-api-reference)
-* [Authors](#-authors)
 
 ---
 
