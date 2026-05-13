@@ -17,7 +17,8 @@ class Analyzer:
         if os.path.exists("baseline.json"):
             try:
                 with open("baseline.json", "r") as f:
-                    return json.load(f)["psi"]
+                    val = json.load(f)["psi"]
+                    return val if val > 0 else 0.01
             except:
                 pass
         return 0.01  # fallback
