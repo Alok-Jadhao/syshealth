@@ -3,21 +3,22 @@ import json
 import os
 
 class Analyzer:
-    def __init__(self, window_size=12, persist_count=3, baseline=None):
+    def __init__(self, window_size=12, persist_count=3):
         self.psi_history = deque(maxlen=window_size)
         self.state = "HEALTHY"
         self.prev_vmstat = None
         self.persist_count = persist_count
         self.degraded_counter = 0
 
-        # Load baseline (an explicit one wins over the saved file)
-        self.baseline = baseline if baseline is not None else self.load_baseline()
+        # Load baseline
+        self.baseline = self.load_baseline()
 
     def load_baseline(self):
         if os.path.exists("baseline.json"):
             try:
                 with open("baseline.json", "r") as f:
-                    return json.load(f)["psi"]
+                    val = json.load(f)["psi"]
+                    return val if val > 0 else 0.01
             except:
                 pass
         return 0.01  # fallback

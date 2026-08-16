@@ -15,11 +15,14 @@
     </div>
     <div class="topbar-right">
       <p class="feed" id="feed-status" aria-live="polite">Connecting&hellip;</p>
+      <button type="button" class="stress-btn" id="stress-btn">&#9889; Stress all</button>
       <button type="button" class="ghost-btn" id="theme-toggle" aria-label="Switch colour theme">
         <span id="theme-label">Auto</span>
       </button>
     </div>
   </header>
+
+  <p class="stress-result" id="stress-result" role="status" hidden></p>
 
   <main>
     <!-- Current state. Not scoped by the range filter: this is always "now". -->
@@ -30,6 +33,7 @@
         <div class="hero">
           <p class="hero-label">
             Memory pressure (PSI avg10) &middot; <span id="hero-scope">&mdash;</span>
+            <span class="presence" id="hero-presence" data-online="false" hidden></span>
           </p>
           <p class="hero-figure" id="hero-psi">&mdash;</p>
           <p class="hero-unit">% of the last 10s with tasks stalled on memory</p>
@@ -112,9 +116,8 @@
                aria-label="Line chart of memory pressure over time. Use the left and right arrow keys to read individual samples, or switch to the table view."></svg>
           <div class="tooltip" id="tooltip" hidden></div>
           <p class="empty-state" id="empty-state">
-            No samples yet. Start the agent with <code>python3 syshealth.py</code> and point
-            <code>SYSHEALTH_SERVER_URL</code> at this server &mdash; run it on each instance you
-            want to compare.
+            No agents reporting yet. Run <code>python3 syshealth.py</code> on each instance,
+            with <code>SYSHEALTH_SERVER_URL</code> pointing at this server.
           </p>
         </div>
         <p class="visually-hidden" id="chart-readout" aria-live="polite"></p>

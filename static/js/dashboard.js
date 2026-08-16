@@ -76,12 +76,28 @@
 
   /* ---------- data ---------- */
 
-  // The server stamps `received_at` (epoch seconds); older payloads only carry
-  // the display string, so fall back to parsing that.
+  // The server stamps `received_ts` (epoch seconds) and `received_at` (a
+  // display string). Older payloads carry only the string, or only the agent's
+  // own clock, so fall back through both.
   function sampleTime(raw) {
+    var stamped = num(raw.received_ts);
+    if (stamped !== null) {
+      return stamped * 1000;
+    }
     var epoch = num(raw.received_at);
     if (epoch !== null) {
       return epoch * 1000;
+    }
+    if (typeof raw.received_at === 'string') {
+      var received = raw.received_at.match(
+        /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})/
+      );
+      if (received) {
+        return new Date(
+          +received[1], +received[2] - 1, +received[3],
+          +received[4], +received[5], +received[6]
+        ).getTime();
+      }
     }
     if (typeof raw.timestamp === 'string') {
       var m = raw.timestamp.match(
@@ -120,9 +136,9 @@
 
   function instanceColor(type) {
     var size = String(type || '').split('.')[1];
-    // Anything off the size ladder keeps the base series hue rather than the
-    // de-emphasis grey, which is reserved for context marks.
-    return SIZE_COLORS[size] || 'var(--series-psi)';
+    // Anything off the ladder takes a separate hue rather than another step of
+    // the ramp, so it can never be misread as a size.
+    return SIZE_COLORS[size] || 'var(--size-other)';
   }
 
   function shortId(id) {
@@ -130,15 +146,36 @@
     return text.length > 12 ? text.slice(-8) : text;
   }
 
+  // Two boxes of the same size share a colour, because colour encodes size and
+  // they genuinely are the same size. A dash pattern tells them apart on the
+  // chart, so identity never rests on a colour that cannot carry it.
+  var DASH_PATTERNS = [null, '7 4', '2 3', '9 3 2 3'];
+
+  // Machines are named by what they run on, which is the thing being compared.
+  // An agent that has not reported a type falls back to its hostname.
   function labelInstances(list) {
-    var seen = {};
+    var counts = {};
+    var seenSoFar = {};
+
     list.forEach(function (inst) {
-      seen[inst.type] = (seen[inst.type] || 0) + 1;
+      counts[inst.type] = (counts[inst.type] || 0) + 1;
     });
+
     list.forEach(function (inst) {
-      inst.label = seen[inst.type] > 1
-        ? inst.type + ' · ' + shortId(inst.id)
-        : inst.type;
+      var nth = seenSoFar[inst.type] || 0;
+      seenSoFar[inst.type] = nth + 1;
+
+      if (inst.type === 'unknown') {
+        inst.label = inst.hostname;
+      } else if (counts[inst.type] > 1) {
+        inst.label = inst.type + ' · ' + shortId(inst.hostname);
+      } else {
+        inst.label = inst.type;
+      }
+
+      inst.dash = counts[inst.type] > 1
+        ? DASH_PATTERNS[nth % DASH_PATTERNS.length]
+        : null;
     });
   }
 
@@ -187,10 +224,13 @@
       .map(function (inst) {
         return {
           id: inst.id,
+          hostname: inst.hostname,
           type: inst.type,
-          name: inst.name,
           label: inst.label,
           color: inst.color,
+          dash: inst.dash,
+          online: inst.online,
+          secondsSince: inst.secondsSince,
           samples: inRange(inst.samples),
           all: inst.samples
         };
@@ -329,7 +369,7 @@
           points: inst.samples,
           value: function (s) { return s.psi; },
           area: false,
-          dashed: false,
+          dash: inst.dash,
           primary: true
         };
       });
@@ -344,7 +384,7 @@
         points: only.samples,
         value: function (s) { return s.psi; },
         area: true,
-        dashed: false,
+        dash: only.dash,
         primary: true
       },
       {
@@ -354,7 +394,7 @@
         points: only.samples,
         value: function (s) { return s.avgPsi; },
         area: false,
-        dashed: true,
+        dash: '5 4',
         primary: false
       }
     ];
@@ -368,7 +408,7 @@
       var item = document.createElement('li');
       var key = el('span', 'legend-key');
       key.style.background = s.color;
-      if (s.dashed) {
+      if (s.dash) {
         key.classList.add('legend-key-dashed');
       }
       item.appendChild(key);
@@ -662,8 +702,8 @@
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round'
         });
-        if (s.dashed) {
-          line.setAttribute('stroke-dasharray', '5 4');
+        if (s.dash) {
+          line.setAttribute('stroke-dasharray', s.dash);
         }
         dataGroup.appendChild(line);
       });
@@ -911,7 +951,7 @@
       var line = el('div', 'tt-row');
       var key = el('span', 'tt-key');
       key.style.background = reading.series.color;
-      if (reading.series.dashed) {
+      if (reading.series.dash) {
         key.classList.add('legend-key-dashed');
       }
       line.appendChild(key);
@@ -1015,6 +1055,8 @@
     var key = latest ? stateKey(latest.state) : 'unknown';
 
     $('#hero-scope').textContent = inst ? inst.label : 'No instance reporting';
+    $('#hero-presence').setAttribute('data-online', inst && inst.online ? 'true' : 'false');
+    $('#hero-presence').hidden = !inst;
     $('#hero-psi').textContent = latest ? formatPsi(latest.psi) : '—';
     $('#status-text').textContent = latest ? latest.state : 'No data';
     $('#status-badge').setAttribute('data-state', key);
@@ -1048,7 +1090,14 @@
       key.style.background = inst.color;
       head.appendChild(key);
       head.appendChild(el('span', 'cmp-type', inst.label));
+
+      var presence = el('span', 'presence');
+      presence.setAttribute('data-online', inst.online ? 'true' : 'false');
+      presence.title = inst.online ? 'Reporting' : 'Not reporting';
+      head.appendChild(presence);
       tile.appendChild(head);
+
+      tile.appendChild(el('p', 'cmp-host', inst.hostname));
 
       tile.appendChild(el('p', 'cmp-value', formatPsi(latest.psi)));
 
@@ -1059,8 +1108,11 @@
       stateRow.appendChild(el('span', null, latest.state));
       tile.appendChild(stateRow);
 
-      tile.appendChild(el('p', 'cmp-note',
-        'mean ' + formatPsi(mean) + ' · peak ' + formatPsi(peak)));
+      var note = 'mean ' + formatPsi(mean) + ' · peak ' + formatPsi(peak);
+      if (!inst.online && inst.secondsSince !== null) {
+        note += ' · last seen ' + formatAgo(inst.secondsSince * 1000);
+      }
+      tile.appendChild(el('p', 'cmp-note', note));
 
       grid.appendChild(tile);
     });
@@ -1321,10 +1373,13 @@
           : [];
         state.instances = rows.map(function (row) {
           return {
-            id: String(row.id),
-            type: String(row.type || 'unknown'),
-            name: String(row.name || row.id),
-            color: instanceColor(row.type),
+            // Hostname is the server's key, so it is the stable identity here.
+            id: String(row.hostname),
+            hostname: String(row.hostname),
+            type: String(row.instance_type || 'unknown'),
+            online: row.online !== false,
+            secondsSince: num(row.seconds_since),
+            color: instanceColor(row.instance_type),
             samples: (Array.isArray(row.samples) ? row.samples : [])
               .map(normalize)
               .filter(Boolean)
@@ -1338,8 +1393,55 @@
       });
   }
 
+  // Asks the server to run `stress` on every reporting agent, so you can watch
+  // the pressure it causes land on the graph.
+  function wireStress() {
+    var button = $('#stress-btn');
+    var result = $('#stress-result');
+    var resetAt = null;
+
+    button.addEventListener('click', function () {
+      button.disabled = true;
+      button.textContent = 'Sending…';
+
+      fetch('run-stress', { method: 'POST', headers: { Accept: 'application/json' } })
+        .then(function (response) {
+          if (!response.ok) {
+            throw new Error('HTTP ' + response.status);
+          }
+          return response.json();
+        })
+        .then(function (data) {
+          clear(result);
+          Object.keys(data).forEach(function (host) {
+            var row = el('span', 'stress-row');
+            row.appendChild(el('strong', null, host));
+            row.appendChild(el('span', null, ' ' + data[host]));
+            result.appendChild(row);
+          });
+          result.hidden = false;
+        })
+        .catch(function (err) {
+          clear(result);
+          result.appendChild(el('span', null, 'Could not start stress: ' + err.message));
+          result.hidden = false;
+        })
+        .then(function () {
+          // The agents run stress for 60s; leave the button out of action a
+          // little longer so runs cannot overlap.
+          window.clearTimeout(resetAt);
+          resetAt = window.setTimeout(function () {
+            button.disabled = false;
+            button.textContent = '⚡ Stress all';
+          }, 65000);
+          load();
+        });
+    });
+  }
+
   function init() {
     wireTheme();
+    wireStress();
 
     wireSegmented('#range-control', function (button) {
       state.rangeMinutes = parseInt(button.getAttribute('data-minutes'), 10) || 0;

@@ -1,70 +1,29 @@
-from collections import OrderedDict, deque
+from collections import defaultdict, deque
 from datetime import datetime
 import time
 
-from flask import Flask, jsonify, render_template, request
+import requests
+from flask import Flask, request, jsonify, render_template
 
 import instance
 
 app = Flask(__name__)
 
-# In-memory store (fast for demo). Bounded so a long-running server
-# cannot grow without limit: 720 samples = ~1 hour at one push per 5s.
-MAX_SAMPLES = 720
-DEFAULT_HISTORY = 20
+# One hour of history at one push per 5s, so the dashboard's longest range has
+# something to draw.
+HISTORY_LIMIT = 720
+ONLINE_WINDOW_SEC = 15
+AGENT_CONTROL_PORT = 5001
 
-# Flat stream, kept for the original /history and /dashboard contracts.
-data_store = deque(maxlen=MAX_SAMPLES)
-
-# The same samples, split per reporting machine, so several instances can be
-# compared. Keyed by instance id; the dicts are shared with data_store.
-instances = OrderedDict()
-
-
-def instance_key(sample):
-    return (
-        sample.get("instance_id")
-        or sample.get("instance_type")
-        or "unknown"
-    )
-
-
-def record(sample):
-    key = instance_key(sample)
-    entry = instances.get(key)
-
-    if entry is None:
-        entry = {
-            "id": key,
-            "type": sample.get("instance_type") or "unknown",
-            "name": sample.get("instance_name") or key,
-            "samples": deque(maxlen=MAX_SAMPLES),
-        }
-        instances[key] = entry
-    else:
-        # A restarted agent may start reporting richer identity than before.
-        if sample.get("instance_type"):
-            entry["type"] = sample["instance_type"]
-        if sample.get("instance_name"):
-            entry["name"] = sample["instance_name"]
-
-    entry["samples"].append(sample)
-
-
-def sorted_instances():
-    """Smallest instance first, so the dashboard's toggle reads as a ladder."""
-    return sorted(
-        instances.values(),
-        key=lambda entry: (instance.size_rank(entry["type"]), entry["type"], entry["id"]),
-    )
-
-
-def clamp_limit(raw):
-    try:
-        limit = int(raw)
-    except (TypeError, ValueError):
-        limit = DEFAULT_HISTORY
-    return max(1, min(limit, MAX_SAMPLES))
+instances = defaultdict(lambda: {
+    "hostname": None,
+    "instance_type": "unknown",
+    "instance_id": None,
+    "agent_ip": None,
+    "last_seen": 0.0,
+    "latest": None,
+    "history": deque(maxlen=HISTORY_LIMIT),
+})
 
 
 @app.route("/")
@@ -72,81 +31,113 @@ def home():
     return render_template("index.html")
 
 
-@app.route("/healthz")
-def healthz():
-    return "SysHealth Cloud Server Running"
-
-
 @app.route("/metrics", methods=["POST"])
 def receive_metrics():
-    data = request.get_json(silent=True)
-    if not isinstance(data, dict):
-        return jsonify({"error": "expected a JSON object"}), 400
+    data = request.json or {}
+    hostname = data.get("hostname") or "unknown"
+    data["received_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Epoch seconds as well, so the dashboard can place samples on a time axis
+    # without re-parsing the display string or trusting the agent's clock.
+    data["received_ts"] = time.time()
 
-    data["timestamp"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    # Epoch seconds too, so the dashboard can place samples on a time axis
-    # without re-parsing the display string.
-    data["received_at"] = time.time()
+    inst = instances[hostname]
+    inst["hostname"] = hostname
+    inst["agent_ip"] = request.remote_addr
+    inst["last_seen"] = time.time()
+    inst["latest"] = data
+    inst["history"].append(data)
 
-    data_store.append(data)
-    record(data)
+    # An agent that knows what it runs on lets the dashboard group and order
+    # machines by size; older agents simply stay "unknown".
+    if data.get("instance_type"):
+        inst["instance_type"] = data["instance_type"]
+    if data.get("instance_id"):
+        inst["instance_id"] = data["instance_id"]
 
     return jsonify({"status": "received"}), 200
 
 
-@app.route("/dashboard", methods=["GET"])
-def dashboard():
-    if not data_store:
-        return jsonify({"message": "No data yet"})
-
-    latest = data_store[-1]
-    return jsonify(latest)
-
-
-@app.route("/history", methods=["GET"])
-def history():
-    limit = clamp_limit(request.args.get("limit", DEFAULT_HISTORY))
-    wanted = request.args.get("instance")
-
-    if wanted:
-        entry = instances.get(wanted)
-        samples = list(entry["samples"]) if entry else []
-    else:
-        samples = list(data_store)
-
-    return jsonify(samples[-limit:])
+def by_size(entry):
+    """Smallest instance first, so the dashboard reads as a size ladder."""
+    return (
+        instance.size_rank(entry.get("instance_type")),
+        entry.get("instance_type") or "",
+        entry.get("hostname") or "",
+    )
 
 
 @app.route("/instances", methods=["GET"])
 def list_instances():
-    return jsonify([
-        {
-            "id": entry["id"],
-            "type": entry["type"],
-            "name": entry["name"],
-            "samples": len(entry["samples"]),
-            "latest": entry["samples"][-1] if entry["samples"] else None,
-        }
-        for entry in sorted_instances()
-    ])
+    now = time.time()
+    result = []
+    for host, inst in instances.items():
+        online = (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC
+        result.append({
+            "hostname": host,
+            "instance_type": inst["instance_type"],
+            "instance_id": inst["instance_id"],
+            "online": online,
+            "last_seen": inst["last_seen"],
+            "seconds_since": round(now - inst["last_seen"], 1),
+            "latest": inst["latest"],
+        })
+    result.sort(key=by_size)
+    return jsonify(result)
+
+
+@app.route("/instances/<hostname>/history", methods=["GET"])
+def instance_history(hostname):
+    inst = instances.get(hostname)
+    if not inst:
+        return jsonify([])
+    return jsonify(list(inst["history"]))
 
 
 @app.route("/series", methods=["GET"])
 def series():
-    """Every instance's recent history in one response — what the dashboard reads."""
-    limit = clamp_limit(request.args.get("limit", MAX_SAMPLES))
+    """Every instance's recent history in one response — what the graph reads."""
+    try:
+        limit = int(request.args.get("limit", HISTORY_LIMIT))
+    except ValueError:
+        limit = HISTORY_LIMIT
+    limit = max(1, min(limit, HISTORY_LIMIT))
 
-    return jsonify({
-        "instances": [
-            {
-                "id": entry["id"],
-                "type": entry["type"],
-                "name": entry["name"],
-                "samples": list(entry["samples"])[-limit:],
-            }
-            for entry in sorted_instances()
-        ]
-    })
+    now = time.time()
+    payload = []
+    for host, inst in instances.items():
+        payload.append({
+            "hostname": host,
+            "instance_type": inst["instance_type"],
+            "instance_id": inst["instance_id"],
+            "online": (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC,
+            "seconds_since": round(now - inst["last_seen"], 1),
+            "samples": list(inst["history"])[-limit:],
+        })
+    payload.sort(key=by_size)
+    return jsonify({"instances": payload})
+
+
+@app.route("/run-stress", methods=["POST"])
+def run_stress():
+    now = time.time()
+    results = {}
+    for host, inst in instances.items():
+        if (now - inst["last_seen"]) > ONLINE_WINDOW_SEC:
+            results[host] = "offline"
+            continue
+        agent_ip = inst.get("agent_ip")
+        if not agent_ip:
+            results[host] = "no ip"
+            continue
+        try:
+            r = requests.post(
+                f"http://{agent_ip}:{AGENT_CONTROL_PORT}/stress",
+                timeout=4
+            )
+            results[host] = "started" if r.status_code == 200 else f"err {r.status_code}"
+        except Exception as e:
+            results[host] = f"unreachable: {e}"
+    return jsonify(results)
 
 
 if __name__ == "__main__":

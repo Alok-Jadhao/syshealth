@@ -1,79 +1,85 @@
 import os
 import time
 import json
+import socket
+import subprocess
 import sys
+import threading
 import requests
+from http.server import HTTPServer, BaseHTTPRequestHandler
 import instance
 from collector import Collector
 from analyzer import Analyzer
 from reporter import Reporter
 
-# Change this to your server IP later, or set SYSHEALTH_SERVER_URL — each
-# instance you want to compare needs to point at the same server.
-SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://<SERVER_IP>:5000/metrics")
+HOSTNAME = socket.gethostname()
+SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://13.61.11.18:5000/metrics")
+CONTROL_PORT = 5001
+
+
+class ControlHandler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        if self.path == "/stress":
+            subprocess.Popen(
+                ["stress", "--vm", "2", "--vm-bytes", "800M", "--vm-keep", "--timeout", "60s"],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            )
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"stress started")
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, *args):
+        pass
+
+
+def run_control_server():
+    HTTPServer(("0.0.0.0", CONTROL_PORT), ControlHandler).serve_forever()
 
 
 def calibrate():
     collector = Collector()
     samples = []
-
     print("Calibrating baseline... keep system idle for 60 seconds")
-
-    for _ in range(12):  # 12 samples (5 sec each = 60 sec)
+    for _ in range(12):
         data = collector.get_metrics()
         samples.append(data['psi'])
         time.sleep(5)
-
     baseline = sum(samples) / len(samples)
-
     with open("baseline.json", "w") as f:
         json.dump({"psi": baseline}, f)
-
     print(f"Baseline saved: {baseline:.4f}")
-
-
-def load_baseline():
-    try:
-        with open("baseline.json", "r") as f:
-            return json.load(f)["psi"]
-    except:
-        return 0.01  # fallback default
 
 
 def push_to_server(payload):
     try:
         requests.post(SERVER_URL, json=payload, timeout=2)
     except requests.exceptions.RequestException:
-        print("[Cloud] Server not reachable, skipping push...")
+        pass
 
 
 def main():
-    collector = Collector()
-    baseline = load_baseline()
+    threading.Thread(target=run_control_server, daemon=True).start()
 
-    analyzer = Analyzer(baseline=baseline)
+    collector = Collector()
+    analyzer = Analyzer()
     reporter = Reporter()
     identity = instance.detect()
 
-    print("SysHealth v2.0 Started...")
-    print(f"Instance: {identity['instance_type']} ({identity['instance_id']})")
-    print(f"Using baseline: {baseline:.4f}")
+    print(f"SysHealth started | control port {CONTROL_PORT}")
+    print(f"Instance: {identity['instance_type']} ({HOSTNAME})")
     print("-" * 50)
 
     try:
         while True:
             data = collector.get_metrics()
-
-            # Updated analyzer returns reason
-            state, avg_psi, s_d, t_d, reason = analyzer.update(
-                data['psi'], data['vmstat']
-            )
-
-            # Local logging
+            state, avg_psi, s_d, t_d, reason = analyzer.update(data['psi'], data['vmstat'])
             reporter.log_status(state, data['psi'], avg_psi, s_d, t_d, reason)
 
-            # 🌐 Cloud Push (NEW FEATURE)
             payload = {
+                "hostname": HOSTNAME,
                 "timestamp": time.time(),
                 "state": state,
                 "psi": data['psi'],
@@ -81,15 +87,13 @@ def main():
                 "pgscan_delta": s_d,
                 "pgsteal_delta": t_d,
                 "reason": reason,
-                "baseline": baseline,
-                # Lets the server keep each instance's stream separate.
-                "instance_id": identity["instance_id"],
+                # What the dashboard groups, orders and colours machines by,
+                # and what the threshold lines are drawn from.
                 "instance_type": identity["instance_type"],
-                "instance_name": identity["instance_name"]
+                "instance_id": identity["instance_id"],
+                "baseline": analyzer.baseline
             }
-
             push_to_server(payload)
-
             time.sleep(5)
 
     except KeyboardInterrupt:

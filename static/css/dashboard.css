@@ -27,6 +27,9 @@
   --size-small: #5598e7;
   --size-medium: #2a78d6;
   --size-large: #184f95;
+  /* Off the size ladder (an agent that never reported a type). A separate hue,
+     not another step, so it never reads as a size. */
+  --size-other: #eb6834;
 
   /* Status scale: reserved meaning, never reused for a series. */
   --status-good: #0ca30c;
@@ -60,6 +63,7 @@
     --size-small: #6da7ec;
     --size-medium: #2a78d6;
     --size-large: #184f95;
+    --size-other: #d95926;
   }
 }
 
@@ -83,6 +87,7 @@
   --size-small: #6da7ec;
   --size-medium: #2a78d6;
   --size-large: #184f95;
+  --size-other: #d95926;
 }
 
 * {
@@ -185,6 +190,62 @@ body {
 .chart:focus-visible {
   outline: 2px solid var(--series-psi);
   outline-offset: 2px;
+}
+
+/* Triggers a load on every agent, so it reads as an action, not a filter. */
+.stress-btn {
+  border: 1px solid var(--border);
+  background: var(--hover-wash);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.stress-btn:hover:not(:disabled) {
+  background: var(--surface-1);
+  border-color: var(--text-muted);
+}
+
+.stress-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stress-btn:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+.stress-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  max-width: 1120px;
+  margin: 12px auto -8px;
+  padding: 10px 24px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Whether an agent is still reporting. The shape changes with the state, so
+   the colour is never carrying it alone. */
+.presence {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--status-good);
+}
+
+.presence[data-online="false"] {
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
 }
 
 /* ---------- layout ---------- */
@@ -354,8 +415,19 @@ main {
   font-variant-numeric: tabular-nums;
 }
 
+.cmp-head .presence {
+  margin-left: auto;
+}
+
+.cmp-host {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .cmp-value {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   font-size: 32px;
   font-weight: 600;
   line-height: 1.1;
@@ -416,7 +488,10 @@ main {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-1);
-  max-width: 100%;
+  /* Shrink into whatever the row's label leaves, then scroll inside itself —
+     a percentage max-width would ignore the label and push the page sideways. */
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -497,7 +572,10 @@ main {
 .legend {
   display: flex;
   align-items: center;
-  gap: 16px;
+  /* Wraps rather than pushing the page sideways once a fleet has more than a
+     few machines in it. */
+  flex-wrap: wrap;
+  gap: 6px 16px;
   margin: 2px 0 0;
   padding: 0;
   list-style: none;
