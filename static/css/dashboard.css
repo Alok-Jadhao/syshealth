@@ -20,6 +20,14 @@
   --series-psi: #2a78d6;
   --series-avg: #898781;
 
+  /* Instance sizes are an ordered scale, so they get one hue stepped
+     light to dark rather than four unrelated colours. The step is fixed per
+     size: selecting one instance never repaints another. */
+  --size-micro: #86b6ef;
+  --size-small: #5598e7;
+  --size-medium: #2a78d6;
+  --size-large: #184f95;
+
   /* Status scale: reserved meaning, never reused for a series. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
@@ -47,6 +55,11 @@
 
     --series-psi: #3987e5;
     --series-avg: #898781;
+
+    --size-micro: #b7d3f6;
+    --size-small: #6da7ec;
+    --size-medium: #2a78d6;
+    --size-large: #184f95;
   }
 }
 
@@ -65,10 +78,21 @@
 
   --series-psi: #3987e5;
   --series-avg: #898781;
+
+  --size-micro: #b7d3f6;
+  --size-small: #6da7ec;
+  --size-medium: #2a78d6;
+  --size-large: #184f95;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* A class that sets `display` would otherwise beat the hidden attribute, and
+   several components here are shown and hidden by it. */
+[hidden] {
+  display: none !important;
 }
 
 body {
@@ -301,21 +325,81 @@ main {
   font-size: 11px;
 }
 
+/* ---------- comparison tiles ---------- */
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.cmp-tile {
+  padding: 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cmp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cmp-type {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-value {
+  margin: 8px 0 0;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.cmp-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cmp-note {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- filter row ---------- */
 
 .filterbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 12px 20px;
   flex-wrap: wrap;
   margin: 28px 0 14px;
+}
+
+.filter-group-end {
+  margin-left: auto;
 }
 
 .filter-group {
   display: flex;
   align-items: center;
   gap: 10px;
+  /* Lets a long control shrink and scroll inside itself rather than pushing
+     the page sideways. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .filter-label {
@@ -332,9 +416,19 @@ main {
   border: 1px solid var(--border);
   border-radius: 999px;
   background: var(--surface-1);
+  max-width: 100%;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.segmented::-webkit-scrollbar {
+  display: none;
 }
 
 .segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
@@ -343,6 +437,11 @@ main {
   padding: 5px 12px;
   border-radius: 999px;
   cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented-keyed button {
+  font-variant-numeric: tabular-nums;
 }
 
 .segmented button:hover {
@@ -412,19 +511,19 @@ main {
   gap: 7px;
 }
 
-/* Legends mirror the mark: a line key for a line series. */
+/* Legends mirror the mark: a line key for a line series. The colour is set
+   inline from the series, so the dash pattern has to come from a mask. */
 .legend-key {
+  flex: none;
   width: 16px;
   height: 2px;
   border-radius: 1px;
-}
-
-.legend-key-psi {
   background: var(--series-psi);
 }
 
-.legend-key-avg {
-  background: var(--series-avg);
+.legend-key-dashed {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 9px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 9px);
 }
 
 /* ---------- plot ---------- */
@@ -437,10 +536,6 @@ main {
   display: block;
   width: 100%;
   touch-action: pan-y;
-}
-
-.chart[hidden] {
-  display: none;
 }
 
 .empty-state {
@@ -473,10 +568,6 @@ main {
   pointer-events: none;
 }
 
-.tooltip[hidden] {
-  display: none;
-}
-
 .tt-time {
   margin: 0 0 8px;
   color: var(--text-secondary);
@@ -505,18 +596,12 @@ main {
 }
 
 .tt-key {
+  flex: none;
   width: 12px;
   height: 2px;
   border-radius: 1px;
   align-self: center;
-}
-
-.tt-key-psi {
   background: var(--series-psi);
-}
-
-.tt-key-avg {
-  background: var(--series-avg);
 }
 
 .tt-state {

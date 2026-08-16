@@ -1,13 +1,16 @@
+import os
 import time
 import json
 import sys
 import requests
+import instance
 from collector import Collector
 from analyzer import Analyzer
 from reporter import Reporter
 
-# Change this to your server IP later
-SERVER_URL = "http://<SERVER_IP>:5000/metrics"
+# Change this to your server IP later, or set SYSHEALTH_SERVER_URL — each
+# instance you want to compare needs to point at the same server.
+SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://<SERVER_IP>:5000/metrics")
 
 
 def calibrate():
@@ -50,8 +53,10 @@ def main():
 
     analyzer = Analyzer(baseline=baseline)
     reporter = Reporter()
+    identity = instance.detect()
 
     print("SysHealth v2.0 Started...")
+    print(f"Instance: {identity['instance_type']} ({identity['instance_id']})")
     print(f"Using baseline: {baseline:.4f}")
     print("-" * 50)
 
@@ -76,7 +81,11 @@ def main():
                 "pgscan_delta": s_d,
                 "pgsteal_delta": t_d,
                 "reason": reason,
-                "baseline": baseline
+                "baseline": baseline,
+                # Lets the server keep each instance's stream separate.
+                "instance_id": identity["instance_id"],
+                "instance_type": identity["instance_type"],
+                "instance_name": identity["instance_name"]
             }
 
             push_to_server(payload)

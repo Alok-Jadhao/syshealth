@@ -26,9 +26,11 @@
     <section class="overview" aria-labelledby="overview-heading">
       <h1 class="section-heading" id="overview-heading">Current state</h1>
 
-      <div class="overview-grid">
+      <div class="overview-grid" id="overview-single">
         <div class="hero">
-          <p class="hero-label">Memory pressure (PSI avg10)</p>
+          <p class="hero-label">
+            Memory pressure (PSI avg10) &middot; <span id="hero-scope">&mdash;</span>
+          </p>
           <p class="hero-figure" id="hero-psi">&mdash;</p>
           <p class="hero-unit">% of the last 10s with tasks stalled on memory</p>
           <p class="status-badge" id="status-badge" data-state="unknown">
@@ -61,6 +63,11 @@
           </div>
         </div>
       </div>
+
+      <!-- Comparing instances there is no single headline number, so the
+           hero gives way to one tile per machine. -->
+      <div class="compare-grid" id="overview-compare" hidden
+           role="group" aria-label="Latest sample per instance"></div>
     </section>
 
     <!-- One filter row, above everything it scopes. -->
@@ -75,6 +82,12 @@
         </div>
       </div>
 
+      <div class="filter-group" id="instance-filter" role="group" aria-label="Instance" hidden>
+        <span class="filter-label" id="instance-label">Instance</span>
+        <div class="segmented segmented-keyed" id="instance-control"
+             role="radiogroup" aria-labelledby="instance-label"></div>
+      </div>
+
       <div class="filter-group filter-group-end" role="group" aria-label="View">
         <div class="segmented" id="view-control" role="radiogroup" aria-label="View">
           <button type="button" role="radio" data-view="chart" aria-checked="true" class="is-selected">Chart</button>
@@ -87,19 +100,10 @@
       <figure class="card chart-card" id="chart-card">
         <figcaption class="card-head">
           <div>
-            <h2 class="card-title">Memory pressure over time</h2>
+            <h2 class="card-title" id="card-title">Memory pressure over time</h2>
             <p class="card-subtitle" id="chart-subtitle">PSI avg10 per sample, with the analyser&rsquo;s rolling average.</p>
           </div>
-          <ul class="legend" id="legend">
-            <li>
-              <span class="legend-key legend-key-psi" aria-hidden="true"></span>
-              <span>PSI avg10</span>
-            </li>
-            <li>
-              <span class="legend-key legend-key-avg" aria-hidden="true"></span>
-              <span>Rolling average</span>
-            </li>
-          </ul>
+          <ul class="legend" id="legend"></ul>
         </figcaption>
 
         <div class="plot-wrap" id="plot-wrap">
@@ -109,7 +113,8 @@
           <div class="tooltip" id="tooltip" hidden></div>
           <p class="empty-state" id="empty-state">
             No samples yet. Start the agent with <code>python3 syshealth.py</code> and point
-            <code>SERVER_URL</code> at this server.
+            <code>SYSHEALTH_SERVER_URL</code> at this server &mdash; run it on each instance you
+            want to compare.
           </p>
         </div>
         <p class="visually-hidden" id="chart-readout" aria-live="polite"></p>
@@ -128,6 +133,7 @@
             <thead>
               <tr>
                 <th scope="col">Time</th>
+                <th scope="col" id="table-instance-head" hidden>Instance</th>
                 <th scope="col" class="num">PSI avg10</th>
                 <th scope="col" class="num">Rolling avg</th>
                 <th scope="col">State</th>

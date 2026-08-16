@@ -16,8 +16,21 @@
     { multiple: 5, label: 'Critical (5× baseline)', shortLabel: 'Critical (5×)', state: 'critical' }
   ];
 
+  // Instance sizes are an ordered scale, so they take one hue stepped
+  // light→dark rather than four unrelated colours: bigger box, darker line.
+  // The step is fixed per size, so selecting one instance never repaints another.
+  var SIZE_COLORS = {
+    micro: 'var(--size-micro)',
+    small: 'var(--size-small)',
+    medium: 'var(--size-medium)',
+    large: 'var(--size-large)'
+  };
+
+  var ALL = 'all';
+
   var state = {
-    samples: [],
+    instances: [],
+    selected: ALL,
     rangeMinutes: 15,
     view: 'chart',
     activeIndex: null,
@@ -43,6 +56,17 @@
     while (node.firstChild) {
       node.removeChild(node.firstChild);
     }
+  }
+
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== undefined && text !== null) {
+      node.textContent = text;
+    }
+    return node;
   }
 
   function num(value) {
@@ -94,14 +118,86 @@
     };
   }
 
+  function instanceColor(type) {
+    var size = String(type || '').split('.')[1];
+    // Anything off the size ladder keeps the base series hue rather than the
+    // de-emphasis grey, which is reserved for context marks.
+    return SIZE_COLORS[size] || 'var(--series-psi)';
+  }
+
+  function shortId(id) {
+    var text = String(id || '');
+    return text.length > 12 ? text.slice(-8) : text;
+  }
+
+  function labelInstances(list) {
+    var seen = {};
+    list.forEach(function (inst) {
+      seen[inst.type] = (seen[inst.type] || 0) + 1;
+    });
+    list.forEach(function (inst) {
+      inst.label = seen[inst.type] > 1
+        ? inst.type + ' · ' + shortId(inst.id)
+        : inst.type;
+    });
+  }
+
+  function selectedInstances() {
+    var withData = state.instances.filter(function (inst) {
+      return inst.samples.length;
+    });
+    if (state.selected === ALL) {
+      return withData;
+    }
+    return withData.filter(function (inst) {
+      return inst.id === state.selected;
+    });
+  }
+
+  function comparing() {
+    return state.selected === ALL && selectedInstances().length > 1;
+  }
+
+  // The range is measured from the newest sample anywhere, so instances stay
+  // on a common window even if one of them stopped reporting.
+  function latestTime() {
+    var newest = null;
+    state.instances.forEach(function (inst) {
+      var last = inst.samples[inst.samples.length - 1];
+      if (last && (newest === null || last.t > newest)) {
+        newest = last.t;
+      }
+    });
+    return newest;
+  }
+
   function inRange(samples) {
-    if (!state.rangeMinutes || !samples.length) {
+    var newest = latestTime();
+    if (!state.rangeMinutes || newest === null) {
       return samples;
     }
-    var cutoff = samples[samples.length - 1].t - state.rangeMinutes * 60000;
+    var cutoff = newest - state.rangeMinutes * 60000;
     return samples.filter(function (s) {
       return s.t >= cutoff;
     });
+  }
+
+  function scopedInstances() {
+    return selectedInstances()
+      .map(function (inst) {
+        return {
+          id: inst.id,
+          type: inst.type,
+          name: inst.name,
+          label: inst.label,
+          color: inst.color,
+          samples: inRange(inst.samples),
+          all: inst.samples
+        };
+      })
+      .filter(function (inst) {
+        return inst.samples.length;
+      });
   }
 
   /* ---------- formatting ---------- */
@@ -121,7 +217,7 @@
   }
 
   function formatPsi(value, digits) {
-    if (value === null || !isFinite(value)) {
+    if (value === null || value === undefined || !isFinite(value)) {
       return '—';
     }
     return value.toFixed(typeof digits === 'number' ? digits : 2);
@@ -180,20 +276,27 @@
     return { max: top, step: step, ticks: ticks };
   }
 
+  function medianInterval(points) {
+    if (points.length < 2) {
+      return 0;
+    }
+    var deltas = [];
+    for (var i = 1; i < points.length; i++) {
+      deltas.push(points[i].t - points[i - 1].t);
+    }
+    deltas.sort(function (a, b) {
+      return a - b;
+    });
+    return deltas[Math.floor(deltas.length / 2)] || 0;
+  }
+
   // Split on gaps so a restarted agent does not get a straight line drawn
   // across the minutes it was away.
   function segmentize(points) {
     if (points.length < 2) {
       return points.length ? [points] : [];
     }
-    var deltas = [];
-    for (var i = 1; i < points.length; i++) {
-      deltas.push(points[i].t - points[i - 1].t);
-    }
-    var sorted = deltas.slice().sort(function (a, b) {
-      return a - b;
-    });
-    var median = sorted[Math.floor(sorted.length / 2)] || 0;
+    var median = medianInterval(points);
     var maxGap = median > 0 ? median * 4 : Infinity;
 
     var segments = [];
@@ -211,16 +314,111 @@
 
   /* ---------- chart ---------- */
 
-  function renderChart(samples) {
+  // One drawing routine for both modes. Single instance: pressure plus its
+  // rolling average and its thresholds. Several: one pressure line each.
+  function buildSeries(scoped, multi) {
+    if (!scoped.length) {
+      return [];
+    }
+    if (multi) {
+      return scoped.map(function (inst) {
+        return {
+          key: inst.id,
+          name: inst.label,
+          color: inst.color,
+          points: inst.samples,
+          value: function (s) { return s.psi; },
+          area: false,
+          dashed: false,
+          primary: true
+        };
+      });
+    }
+
+    var only = scoped[0];
+    return [
+      {
+        key: only.id + ':psi',
+        name: 'PSI avg10',
+        color: only.color,
+        points: only.samples,
+        value: function (s) { return s.psi; },
+        area: true,
+        dashed: false,
+        primary: true
+      },
+      {
+        key: only.id + ':avg',
+        name: 'Rolling average',
+        color: 'var(--series-avg)',
+        points: only.samples,
+        value: function (s) { return s.avgPsi; },
+        area: false,
+        dashed: true,
+        primary: false
+      }
+    ];
+  }
+
+  function renderLegend(series) {
+    var legend = $('#legend');
+    clear(legend);
+
+    series.forEach(function (s) {
+      var item = document.createElement('li');
+      var key = el('span', 'legend-key');
+      key.style.background = s.color;
+      if (s.dashed) {
+        key.classList.add('legend-key-dashed');
+      }
+      item.appendChild(key);
+      item.appendChild(el('span', null, s.name));
+      legend.appendChild(item);
+    });
+  }
+
+  // End labels are mandatory once several lines share the plot; when lines
+  // converge, nudge the labels apart and connect each to its line with a leader.
+  function placeEndLabels(entries, top, bottom) {
+    var minGap = 15;
+    entries.sort(function (a, b) {
+      return a.y - b.y;
+    });
+    entries.forEach(function (entry) {
+      entry.labelY = entry.y;
+    });
+    for (var i = 1; i < entries.length; i++) {
+      if (entries[i].labelY - entries[i - 1].labelY < minGap) {
+        entries[i].labelY = entries[i - 1].labelY + minGap;
+      }
+    }
+    var overflow = entries.length
+      ? entries[entries.length - 1].labelY - bottom
+      : 0;
+    if (overflow > 0) {
+      entries.forEach(function (entry) {
+        entry.labelY -= overflow;
+      });
+    }
+    entries.forEach(function (entry) {
+      entry.labelY = Math.max(top, entry.labelY);
+    });
+    return entries;
+  }
+
+  function renderChart(scoped) {
     var svg = $('#chart');
     var wrap = $('#plot-wrap');
     var empty = $('#empty-state');
+    var multi = scoped.length > 1;
+    var series = buildSeries(scoped, multi);
 
     clear(svg);
     state.layout = null;
     hideTooltip();
+    renderLegend(series);
 
-    if (!samples.length) {
+    if (!series.length) {
       svg.setAttribute('hidden', '');
       empty.removeAttribute('hidden');
       svg.setAttribute('aria-label', 'Memory pressure chart. No samples in the selected range.');
@@ -235,7 +433,7 @@
     var narrow = width < 560;
     var pad = {
       top: 22,
-      right: narrow ? 46 : 66,
+      right: narrow ? 52 : (multi ? 84 : 66),
       bottom: 30,
       left: narrow ? 44 : 54
     };
@@ -248,31 +446,48 @@
 
     var dataMax = 0;
     var dataMin = Infinity;
-    samples.forEach(function (s) {
-      dataMax = Math.max(dataMax, s.psi, s.avgPsi);
-      dataMin = Math.min(dataMin, s.psi);
+    var t0 = Infinity;
+    var t1 = -Infinity;
+
+    series.forEach(function (s) {
+      s.points.forEach(function (p) {
+        var v = s.value(p);
+        dataMax = Math.max(dataMax, v);
+        dataMin = Math.min(dataMin, v);
+        t0 = Math.min(t0, p.t);
+        t1 = Math.max(t1, p.t);
+      });
     });
+    if (!isFinite(dataMin)) {
+      dataMin = 0;
+    }
+
+    // Thresholds are calibrated per machine, so they only make sense when a
+    // single instance is on screen.
+    var thresholds = [];
+    if (!multi) {
+      var baseline = null;
+      var points = scoped[0].samples;
+      for (var b = points.length - 1; b >= 0; b--) {
+        if (points[b].baseline !== null && points[b].baseline > 0) {
+          baseline = points[b].baseline;
+          break;
+        }
+      }
+      if (baseline) {
+        THRESHOLDS.forEach(function (t) {
+          thresholds.push({
+            value: baseline * t.multiple,
+            label: t.label,
+            shortLabel: t.shortLabel,
+            state: t.state
+          });
+        });
+      }
+    }
 
     // Threshold rules may widen the scale, but never by more than 2x the data:
     // a far-away critical line must not squash the plot into the floor.
-    var baseline = null;
-    for (var b = samples.length - 1; b >= 0; b--) {
-      if (samples[b].baseline !== null && samples[b].baseline > 0) {
-        baseline = samples[b].baseline;
-        break;
-      }
-    }
-    var thresholds = [];
-    if (baseline) {
-      THRESHOLDS.forEach(function (t) {
-        thresholds.push({
-          value: baseline * t.multiple,
-          label: t.label,
-          shortLabel: t.shortLabel,
-          state: t.state
-        });
-      });
-    }
     var scaleMax = dataMax;
     thresholds.forEach(function (t) {
       if (dataMax === 0 || t.value <= dataMax * 2) {
@@ -285,9 +500,6 @@
     // Ticks stay as coarse as the step; single values keep two places so a
     // small reading never rounds away to "0".
     var valueDigits = Math.max(2, digits);
-
-    var t0 = samples[0].t;
-    var t1 = samples[samples.length - 1].t;
     var span = t1 - t0;
 
     function x(t) {
@@ -385,6 +597,7 @@
           'stroke-width': 1,
           'stroke-dasharray': '4 3'
         }));
+
         // Sit the label under its rule when there is no room above it.
         var below = ty - 14 < pad.top;
         var labelY = below ? ty + 14 : ty - 5;
@@ -410,104 +623,142 @@
         annotationLabels.appendChild(annotation);
       });
 
-    var segments = segmentize(samples);
+    var endEntries = [];
 
-    function pathFor(points, key) {
-      return points
-        .map(function (p, i) {
-          return (i ? 'L' : 'M') + x(p.t).toFixed(2) + ' ' + y(p[key]).toFixed(2);
-        })
-        .join(' ');
-    }
+    series.forEach(function (s) {
+      function pathFor(points) {
+        return points
+          .map(function (p, i) {
+            return (i ? 'L' : 'M') + x(p.t).toFixed(2) + ' ' + y(s.value(p)).toFixed(2);
+          })
+          .join(' ');
+      }
 
-    segments.forEach(function (points) {
-      if (points.length === 1) {
+      segmentize(s.points).forEach(function (points) {
+        if (points.length === 1) {
+          dataGroup.appendChild(svgEl('circle', {
+            cx: x(points[0].t), cy: y(s.value(points[0])), r: 3,
+            fill: s.color, stroke: 'var(--surface-1)', 'stroke-width': 2
+          }));
+          return;
+        }
+
+        // Area wash under a lone primary series: a tint, never a saturated
+        // block, and never stacked up under several overlapping lines.
+        if (s.area) {
+          var area = pathFor(points) +
+            ' L' + x(points[points.length - 1].t).toFixed(2) + ' ' + (pad.top + plotH) +
+            ' L' + x(points[0].t).toFixed(2) + ' ' + (pad.top + plotH) + ' Z';
+          dataGroup.appendChild(svgEl('path', {
+            d: area, fill: s.color, 'fill-opacity': 0.1, stroke: 'none'
+          }));
+        }
+
+        var line = svgEl('path', {
+          d: pathFor(points),
+          fill: 'none',
+          stroke: s.color,
+          'stroke-width': 2,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round'
+        });
+        if (s.dashed) {
+          line.setAttribute('stroke-dasharray', '5 4');
+        }
+        dataGroup.appendChild(line);
+      });
+
+      var last = s.points[s.points.length - 1];
+      if (!last) {
         return;
       }
-      // Area wash under the primary series: a tint, never a saturated block.
-      var area = pathFor(points, 'psi') +
-        ' L' + x(points[points.length - 1].t).toFixed(2) + ' ' + (pad.top + plotH) +
-        ' L' + x(points[0].t).toFixed(2) + ' ' + (pad.top + plotH) + ' Z';
-      dataGroup.appendChild(svgEl('path', {
-        d: area, fill: 'var(--series-psi)', 'fill-opacity': 0.1, stroke: 'none'
-      }));
+      var lastX = x(last.t);
+      var lastY = y(s.value(last));
 
-      // Rolling average is context, so it takes the de-emphasis grey.
-      dataGroup.appendChild(svgEl('path', {
-        d: pathFor(points, 'avgPsi'),
-        fill: 'none',
-        stroke: 'var(--series-avg)',
-        'stroke-width': 2,
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round',
-        'stroke-dasharray': '5 4'
-      }));
-
-      dataGroup.appendChild(svgEl('path', {
-        d: pathFor(points, 'psi'),
-        fill: 'none',
-        stroke: 'var(--series-psi)',
-        'stroke-width': 2,
-        'stroke-linecap': 'round',
-        'stroke-linejoin': 'round'
-      }));
-    });
-
-    var last = samples[samples.length - 1];
-    var lastX = x(last.t);
-    var lastY = y(last.psi);
-
-    if (samples.length === 1) {
-      dataGroup.appendChild(svgEl('circle', {
-        cx: lastX, cy: lastY, r: 4,
-        fill: 'var(--series-psi)',
-        stroke: 'var(--surface-1)', 'stroke-width': 2
-      }));
-    } else {
       // End marker carries a 2px surface ring so it stays legible over the line.
       dataGroup.appendChild(svgEl('circle', {
         cx: lastX, cy: lastY, r: 4.5,
-        fill: 'var(--series-psi)',
+        fill: s.color,
         stroke: 'var(--surface-1)', 'stroke-width': 2
       }));
-    }
 
-    // One selective direct label: the current value at the line end. Measured
-    // against the right edge so it is never clipped.
-    var endText = formatPsi(last.psi, valueDigits);
-    var estimatedWidth = endText.length * 7.2;
-    var overflows = lastX + 10 + estimatedWidth > width - 4;
-    var endLabel = svgEl('text', {
-      x: overflows ? width - 4 : lastX + 10,
-      y: Math.max(pad.top + 4, Math.min(lastY + 4, pad.top + plotH)),
-      'text-anchor': overflows ? 'end' : 'start',
-      fill: 'var(--text-primary)',
-      'font-size': 12,
-      'font-weight': 600,
-      'font-variant-numeric': 'tabular-nums',
-      stroke: 'var(--surface-1)',
-      'stroke-width': 3,
-      'stroke-linejoin': 'round',
-      'paint-order': 'stroke fill'
+      if (s.primary) {
+        endEntries.push({
+          x: lastX,
+          y: lastY,
+          color: s.color,
+          text: formatPsi(s.value(last), valueDigits)
+        });
+      }
     });
-    endLabel.textContent = endText;
-    dataGroup.appendChild(endLabel);
+
+    // Direct labels at the line ends — selective by construction: one per
+    // series, never one per point.
+    placeEndLabels(endEntries, pad.top + 6, pad.top + plotH);
+    endEntries.forEach(function (entry) {
+      var labelX = Math.min(entry.x + 10, width - 4);
+      if (Math.abs(entry.labelY - entry.y) > 2) {
+        dataGroup.appendChild(svgEl('path', {
+          d: 'M' + entry.x.toFixed(2) + ' ' + entry.y.toFixed(2) +
+             ' L' + (labelX - 4).toFixed(2) + ' ' + entry.labelY.toFixed(2),
+          fill: 'none',
+          stroke: entry.color,
+          'stroke-width': 1,
+          'stroke-opacity': 0.5
+        }));
+      }
+      var label = svgEl('text', {
+        x: labelX,
+        y: entry.labelY + 4,
+        'text-anchor': 'start',
+        fill: 'var(--text-primary)',
+        'font-size': 12,
+        'font-weight': 600,
+        'font-variant-numeric': 'tabular-nums',
+        stroke: 'var(--surface-1)',
+        'stroke-width': 3,
+        'stroke-linejoin': 'round',
+        'paint-order': 'stroke fill'
+      });
+      label.textContent = entry.text;
+      dataGroup.appendChild(label);
+    });
+
+    // Every distinct sample time on screen: the crosshair snaps to these, so a
+    // reader aims at a moment rather than at any one line.
+    var stops = [];
+    var seenStop = {};
+    series.forEach(function (s) {
+      s.points.forEach(function (p) {
+        if (!seenStop[p.t]) {
+          seenStop[p.t] = true;
+          stops.push(p.t);
+        }
+      });
+    });
+    stops.sort(function (a, b) {
+      return a - b;
+    });
+
+    var tolerance = Math.max(
+      series.reduce(function (acc, s) {
+        return Math.max(acc, medianInterval(s.points));
+      }, 0) * 1.5,
+      1000
+    );
 
     var crosshair = svgEl('g', { visibility: 'hidden' });
     crosshair.appendChild(svgEl('line', {
       x1: 0, x2: 0, y1: pad.top, y2: pad.top + plotH,
       stroke: 'var(--axis)', 'stroke-width': 1
     }));
-    crosshair.appendChild(svgEl('circle', {
-      cx: 0, cy: 0, r: 4.5,
-      fill: 'var(--series-psi)',
-      stroke: 'var(--surface-1)', 'stroke-width': 2
-    }));
-    crosshair.appendChild(svgEl('circle', {
-      cx: 0, cy: 0, r: 3.5,
-      fill: 'var(--series-avg)',
-      stroke: 'var(--surface-1)', 'stroke-width': 2
-    }));
+    series.forEach(function (s) {
+      crosshair.appendChild(svgEl('circle', {
+        cx: 0, cy: 0, r: 4,
+        fill: s.color,
+        stroke: 'var(--surface-1)', 'stroke-width': 2
+      }));
+    });
 
     // The whole plot is the hit target: readers aim at a time, not at a 2px line.
     var overlay = svgEl('rect', {
@@ -524,8 +775,10 @@
     svg.appendChild(overlay);
 
     state.layout = {
-      samples: samples, x: x, y: y, pad: pad, plotW: plotW, plotH: plotH,
-      width: width, digits: valueDigits, crosshair: crosshair, overlay: overlay
+      series: series, stops: stops, tolerance: tolerance,
+      x: x, y: y, pad: pad, plotW: plotW, plotH: plotH,
+      width: width, digits: valueDigits, multi: multi,
+      crosshair: crosshair, overlay: overlay
     };
 
     overlay.addEventListener('pointermove', onPointerMove);
@@ -538,19 +791,35 @@
 
     svg.setAttribute(
       'aria-label',
-      'Memory pressure over time. ' + samples.length + ' samples from ' +
-      formatClock(t0) + ' to ' + formatClock(t1) + '. Current PSI ' +
-      formatPsi(last.psi, valueDigits) + ', range ' + formatPsi(dataMin, valueDigits) +
-      ' to ' + formatPsi(dataMax, valueDigits) +
+      (multi
+        ? 'Memory pressure over time for ' + series.length + ' instances: ' +
+          series.map(function (s) { return s.name; }).join(', ') + '. '
+        : 'Memory pressure over time for ' + scoped[0].label + '. ') +
+      stops.length + ' sample times from ' + formatClock(t0) + ' to ' + formatClock(t1) +
+      ', values from ' + formatPsi(dataMin, valueDigits) + ' to ' +
+      formatPsi(dataMax, valueDigits) +
       '. Use the arrow keys to read individual samples, or switch to the table view.'
     );
 
     if (state.activeIndex !== null) {
-      setActiveIndex(Math.min(state.activeIndex, samples.length - 1));
+      setActiveIndex(Math.min(state.activeIndex, stops.length - 1));
     }
   }
 
   /* ---------- hover & crosshair ---------- */
+
+  function nearestAt(points, t, tolerance) {
+    var best = null;
+    var bestDist = Infinity;
+    for (var i = 0; i < points.length; i++) {
+      var dist = Math.abs(points[i].t - t);
+      if (dist < bestDist) {
+        bestDist = dist;
+        best = points[i];
+      }
+    }
+    return bestDist <= tolerance ? best : null;
+  }
 
   function nearestIndex(clientX) {
     var layout = state.layout;
@@ -560,8 +829,8 @@
 
     var best = 0;
     var bestDist = Infinity;
-    for (var i = 0; i < layout.samples.length; i++) {
-      var dist = Math.abs(layout.x(layout.samples[i].t) - localX);
+    for (var i = 0; i < layout.stops.length; i++) {
+      var dist = Math.abs(layout.x(layout.stops[i]) - localX);
       if (dist < bestDist) {
         bestDist = dist;
         best = i;
@@ -585,30 +854,40 @@
     if (!layout) {
       return;
     }
-    if (index === null || !layout.samples[index]) {
+    if (index === null || layout.stops[index] === undefined) {
       layout.crosshair.setAttribute('visibility', 'hidden');
       hideTooltip();
       return;
     }
 
-    var sample = layout.samples[index];
-    var cx = layout.x(sample.t);
+    var t = layout.stops[index];
+    var cx = layout.x(t);
     var nodes = layout.crosshair.childNodes;
     nodes[0].setAttribute('x1', cx);
     nodes[0].setAttribute('x2', cx);
-    nodes[1].setAttribute('cx', cx);
-    nodes[1].setAttribute('cy', layout.y(sample.psi));
-    nodes[2].setAttribute('cx', cx);
-    nodes[2].setAttribute('cy', layout.y(sample.avgPsi));
-    layout.crosshair.setAttribute('visibility', 'visible');
 
-    showTooltip(sample, cx);
+    var readings = layout.series.map(function (s, i) {
+      var point = nearestAt(s.points, t, layout.tolerance);
+      var dot = nodes[i + 1];
+      if (point) {
+        dot.setAttribute('cx', layout.x(point.t));
+        dot.setAttribute('cy', layout.y(s.value(point)));
+        dot.setAttribute('visibility', 'visible');
+      } else {
+        dot.setAttribute('visibility', 'hidden');
+      }
+      return { series: s, point: point };
+    });
+
+    layout.crosshair.setAttribute('visibility', 'visible');
+    showTooltip(t, readings, cx);
 
     if (state.activeFromKeyboard) {
-      $('#chart-readout').textContent =
-        formatClock(sample.t) + ': PSI ' + formatPsi(sample.psi, layout.digits) +
-        ', rolling average ' + formatPsi(sample.avgPsi, layout.digits) +
-        ', state ' + sample.state + (sample.reason ? '. ' + sample.reason : '');
+      $('#chart-readout').textContent = formatClock(t) + '. ' +
+        readings.map(function (r) {
+          return r.series.name + ' ' +
+            (r.point ? formatPsi(r.series.value(r.point), layout.digits) : 'no sample');
+        }).join(', ') + '.';
     }
   }
 
@@ -621,67 +900,79 @@
 
   // Everything here is built with textContent: `reason` and `state` come off
   // the wire and are never trusted as markup.
-  function showTooltip(sample, cx) {
+  function showTooltip(t, readings, cx) {
     var tip = $('#tooltip');
     var layout = state.layout;
     clear(tip);
 
-    var time = document.createElement('p');
-    time.className = 'tt-time';
-    time.textContent = formatClock(sample.t);
-    tip.appendChild(time);
+    tip.appendChild(el('p', 'tt-time', formatClock(t)));
 
-    [
-      { name: 'PSI avg10', value: sample.psi, key: 'tt-key-psi' },
-      { name: 'Rolling average', value: sample.avgPsi, key: 'tt-key-avg' }
-    ].forEach(function (row) {
-      var line = document.createElement('div');
-      line.className = 'tt-row';
-
-      var key = document.createElement('span');
-      key.className = 'tt-key ' + row.key;
+    readings.forEach(function (reading) {
+      var line = el('div', 'tt-row');
+      var key = el('span', 'tt-key');
+      key.style.background = reading.series.color;
+      if (reading.series.dashed) {
+        key.classList.add('legend-key-dashed');
+      }
       line.appendChild(key);
 
-      var value = document.createElement('span');
-      value.className = 'tt-value';
-      value.textContent = formatPsi(row.value, layout.digits);
+      var value = el('span', 'tt-value',
+        reading.point ? formatPsi(reading.series.value(reading.point), layout.digits) : '—');
       line.appendChild(value);
-
-      var name = document.createElement('span');
-      name.className = 'tt-name';
-      name.textContent = row.name;
-      line.appendChild(name);
-
+      line.appendChild(el('span', 'tt-name', reading.series.name));
       tip.appendChild(line);
     });
 
-    var stateRow = document.createElement('p');
-    stateRow.className = 'tt-state';
-    var dot = document.createElement('span');
-    dot.className = 'state-dot';
-    dot.setAttribute('data-state', stateKey(sample.state));
-    stateRow.appendChild(dot);
-    var stateName = document.createElement('span');
-    stateName.textContent = sample.state;
-    stateRow.appendChild(stateName);
-    tip.appendChild(stateRow);
+    // Comparing instances, the states differ per line, so they ride the rows
+    // above rather than a single footer.
+    var anchor = null;
+    for (var i = 0; i < readings.length; i++) {
+      if (readings[i].point) {
+        anchor = readings[i].point;
+        break;
+      }
+    }
 
-    if (sample.reason) {
-      var reason = document.createElement('p');
-      reason.className = 'tt-reason';
-      reason.textContent = sample.reason;
-      tip.appendChild(reason);
+    if (anchor && !layout.multi) {
+      var stateRow = el('p', 'tt-state');
+      var dot = el('span', 'state-dot');
+      dot.setAttribute('data-state', stateKey(anchor.state));
+      stateRow.appendChild(dot);
+      stateRow.appendChild(el('span', null, anchor.state));
+      tip.appendChild(stateRow);
+
+      if (anchor.reason) {
+        tip.appendChild(el('p', 'tt-reason', anchor.reason));
+      }
+    } else if (anchor) {
+      var worst = readings.reduce(function (acc, r) {
+        if (!r.point) {
+          return acc;
+        }
+        var rank = { critical: 3, degraded: 2, healthy: 1, unknown: 0 }[stateKey(r.point.state)];
+        return rank > acc.rank ? { rank: rank, reading: r } : acc;
+      }, { rank: -1, reading: null });
+
+      if (worst.reading) {
+        var row = el('p', 'tt-state');
+        var worstDot = el('span', 'state-dot');
+        worstDot.setAttribute('data-state', stateKey(worst.reading.point.state));
+        row.appendChild(worstDot);
+        row.appendChild(el('span', null,
+          worst.reading.point.state + ' · ' + worst.reading.series.name));
+        tip.appendChild(row);
+      }
     }
 
     tip.removeAttribute('hidden');
 
     var wrapWidth = $('#plot-wrap').clientWidth || layout.width;
     var pxPerUnit = wrapWidth / layout.width;
-    var anchor = cx * pxPerUnit;
+    var anchorX = cx * pxPerUnit;
     var tipWidth = tip.offsetWidth;
-    var left = anchor + 14;
+    var left = anchorX + 14;
     if (left + tipWidth > wrapWidth) {
-      left = anchor - tipWidth - 14;
+      left = anchorX - tipWidth - 14;
     }
     tip.style.left = Math.max(0, left) + 'px';
     tip.style.top = layout.pad.top + 'px';
@@ -689,10 +980,10 @@
 
   function onChartKeydown(event) {
     var layout = state.layout;
-    if (!layout || !layout.samples.length) {
+    if (!layout || !layout.stops.length) {
       return;
     }
-    var last = layout.samples.length - 1;
+    var last = layout.stops.length - 1;
     var index = state.activeIndex === null ? last : state.activeIndex;
     var next = null;
 
@@ -717,15 +1008,16 @@
     setActiveIndex(next);
   }
 
-  /* ---------- summary, table, chrome ---------- */
+  /* ---------- summary ---------- */
 
-  function renderSummary(latest, total) {
-    var badge = $('#status-badge');
+  function renderSingleSummary(inst) {
+    var latest = inst ? inst.all[inst.all.length - 1] : null;
     var key = latest ? stateKey(latest.state) : 'unknown';
 
+    $('#hero-scope').textContent = inst ? inst.label : 'No instance reporting';
     $('#hero-psi').textContent = latest ? formatPsi(latest.psi) : '—';
     $('#status-text').textContent = latest ? latest.state : 'No data';
-    badge.setAttribute('data-state', key);
+    $('#status-badge').setAttribute('data-state', key);
     $('#hero-reason').textContent = latest && latest.reason
       ? latest.reason
       : 'Waiting for the SysHealth agent to push its first sample.';
@@ -733,74 +1025,193 @@
     $('#tile-avg').textContent = latest ? formatPsi(latest.avgPsi) : '—';
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
     $('#tile-steal').textContent = latest ? formatCount(latest.steal) : '—';
-    $('#tile-count').textContent = formatCount(total);
+    $('#tile-count').textContent = formatCount(inst ? inst.all.length : 0);
   }
 
-  function renderTable(samples) {
+  function renderCompareSummary(scoped) {
+    var grid = $('#overview-compare');
+    clear(grid);
+
+    scoped.forEach(function (inst) {
+      var latest = inst.samples[inst.samples.length - 1];
+      var peak = inst.samples.reduce(function (acc, s) {
+        return Math.max(acc, s.psi);
+      }, 0);
+      var mean = inst.samples.reduce(function (acc, s) {
+        return acc + s.psi;
+      }, 0) / inst.samples.length;
+
+      var tile = el('div', 'cmp-tile');
+
+      var head = el('div', 'cmp-head');
+      var key = el('span', 'legend-key');
+      key.style.background = inst.color;
+      head.appendChild(key);
+      head.appendChild(el('span', 'cmp-type', inst.label));
+      tile.appendChild(head);
+
+      tile.appendChild(el('p', 'cmp-value', formatPsi(latest.psi)));
+
+      var stateRow = el('p', 'cmp-state');
+      var dot = el('span', 'state-dot');
+      dot.setAttribute('data-state', stateKey(latest.state));
+      stateRow.appendChild(dot);
+      stateRow.appendChild(el('span', null, latest.state));
+      tile.appendChild(stateRow);
+
+      tile.appendChild(el('p', 'cmp-note',
+        'mean ' + formatPsi(mean) + ' · peak ' + formatPsi(peak)));
+
+      grid.appendChild(tile);
+    });
+  }
+
+  function renderTable(scoped, multi) {
     var body = $('#table-body');
     clear(body);
 
-    samples.slice().reverse().forEach(function (sample) {
-      var row = document.createElement('tr');
+    $('#table-instance-head').hidden = !multi;
+
+    var rows = [];
+    scoped.forEach(function (inst) {
+      inst.samples.forEach(function (sample) {
+        rows.push({ inst: inst, sample: sample });
+      });
+    });
+    rows.sort(function (a, b) {
+      return b.sample.t - a.sample.t;
+    });
+
+    rows.forEach(function (row) {
+      var sample = row.sample;
+      var tr = document.createElement('tr');
 
       function cell(text, className) {
-        var td = document.createElement('td');
-        if (className) {
-          td.className = className;
-        }
-        td.textContent = text;
-        row.appendChild(td);
-        return td;
+        var td = el('td', className, text);
+        tr.appendChild(td);
       }
 
       cell(formatClock(sample.t));
+
+      if (multi) {
+        var instTd = document.createElement('td');
+        var wrapper = el('span', 'state-cell');
+        var key = el('span', 'legend-key');
+        key.style.background = row.inst.color;
+        wrapper.appendChild(key);
+        wrapper.appendChild(el('span', null, row.inst.label));
+        instTd.appendChild(wrapper);
+        tr.appendChild(instTd);
+      }
+
       cell(formatPsi(sample.psi), 'num');
       cell(formatPsi(sample.avgPsi), 'num');
 
       var stateTd = document.createElement('td');
-      var wrapper = document.createElement('span');
-      wrapper.className = 'state-cell';
-      var dot = document.createElement('span');
-      dot.className = 'state-dot';
-      dot.setAttribute('data-state', stateKey(sample.state));
-      wrapper.appendChild(dot);
-      var name = document.createElement('span');
-      name.textContent = sample.state;
-      wrapper.appendChild(name);
-      stateTd.appendChild(wrapper);
-      row.appendChild(stateTd);
+      var stateWrap = el('span', 'state-cell');
+      var stateDot = el('span', 'state-dot');
+      stateDot.setAttribute('data-state', stateKey(sample.state));
+      stateWrap.appendChild(stateDot);
+      stateWrap.appendChild(el('span', null, sample.state));
+      stateTd.appendChild(stateWrap);
+      tr.appendChild(stateTd);
 
       cell(formatCount(sample.scan), 'num');
       cell(formatCount(sample.steal), 'num');
       cell(sample.reason || '—', 'reason');
 
-      body.appendChild(row);
+      body.appendChild(tr);
     });
   }
 
   function renderFeedStatus() {
     var feed = $('#feed-status');
-    if (!state.samples.length) {
+    var newest = latestTime();
+    if (newest === null) {
       feed.textContent = 'No samples received yet';
       return;
     }
-    var age = Date.now() - state.samples[state.samples.length - 1].t;
+    var age = Date.now() - newest;
     var stale = age > STALE_AFTER_MS;
     feed.textContent = (stale ? 'Last sample ' : 'Updated ') + formatAgo(age);
     feed.setAttribute('data-stale', stale ? 'true' : 'false');
   }
 
+  function renderInstanceControl() {
+    var group = $('#instance-control');
+    var withData = state.instances.filter(function (inst) {
+      return inst.samples.length;
+    });
+
+    // Fall back to comparing when the selected instance stops existing.
+    if (state.selected !== ALL && !withData.some(function (inst) {
+      return inst.id === state.selected;
+    })) {
+      state.selected = ALL;
+    }
+
+    clear(group);
+    $('#instance-filter').hidden = withData.length < 2;
+    if (withData.length < 2) {
+      return;
+    }
+
+    function button(value, text, color) {
+      var node = el('button', null);
+      node.type = 'button';
+      node.setAttribute('role', 'radio');
+      node.setAttribute('data-instance', value);
+      var selected = state.selected === value;
+      node.setAttribute('aria-checked', selected ? 'true' : 'false');
+      if (selected) {
+        node.classList.add('is-selected');
+      }
+      if (color) {
+        var key = el('span', 'legend-key');
+        key.style.background = color;
+        node.appendChild(key);
+      }
+      node.appendChild(el('span', null, text));
+      group.appendChild(node);
+    }
+
+    button(ALL, 'Compare all', null);
+    withData.forEach(function (inst) {
+      button(inst.id, inst.label, inst.color);
+    });
+  }
+
   function renderAll() {
-    var scoped = inRange(state.samples);
-    var latest = state.samples.length ? state.samples[state.samples.length - 1] : null;
+    var scoped = scopedInstances();
+    var multi = scoped.length > 1;
 
-    renderSummary(latest, state.samples.length);
+    renderInstanceControl();
     renderFeedStatus();
-    renderTable(scoped);
 
-    $('#chart-subtitle').textContent = scoped.length
-      ? scoped.length + ' samples · PSI avg10 per sample, with the analyser’s rolling average.'
-      : 'PSI avg10 per sample, with the analyser’s rolling average.';
+    $('#overview-single').hidden = multi;
+    $('#overview-compare').hidden = !multi;
+
+    if (multi) {
+      renderCompareSummary(scoped);
+    } else {
+      renderSingleSummary(scoped[0] || null);
+    }
+
+    renderTable(scoped, multi);
+
+    var sampleCount = scoped.reduce(function (acc, inst) {
+      return acc + inst.samples.length;
+    }, 0);
+
+    $('#card-title').textContent = multi
+      ? 'Memory pressure by instance'
+      : 'Memory pressure over time';
+    $('#chart-subtitle').textContent = multi
+      ? sampleCount + ' samples across ' + scoped.length +
+        ' instances · thresholds are calibrated per machine, so pick one to see them.'
+      : (sampleCount
+        ? sampleCount + ' samples · PSI avg10 per sample, with the analyser’s rolling average.'
+        : 'PSI avg10 per sample, with the analyser’s rolling average.');
 
     if (state.view === 'chart') {
       renderChart(scoped);
@@ -818,7 +1229,7 @@
     } else {
       tableCard.setAttribute('hidden', '');
       chartCard.removeAttribute('hidden');
-      renderChart(inRange(state.samples));
+      renderChart(scopedInstances());
     }
   }
 
@@ -870,7 +1281,7 @@
       mode = modes[(modes.indexOf(mode) + 1) % modes.length];
       apply();
       if (state.view === 'chart') {
-        renderChart(inRange(state.samples));
+        renderChart(scopedInstances());
       }
     });
 
@@ -883,28 +1294,47 @@
     var scoped = $('#scoped');
     scoped.classList.add('is-loading');
 
-    return fetch('history?limit=' + HISTORY_LIMIT, { headers: { Accept: 'application/json' } })
+    return fetch('series?limit=' + HISTORY_LIMIT, { headers: { Accept: 'application/json' } })
       .then(function (response) {
         if (!response.ok) {
           throw new Error('HTTP ' + response.status);
         }
         return response.json();
       })
-      .then(function (payload) {
-        var rows = Array.isArray(payload) ? payload : [];
-        state.samples = rows
-          .map(normalize)
-          .filter(Boolean)
-          .sort(function (a, b) {
-            return a.t - b.t;
-          });
-        renderAll();
-      })
-      .catch(function () {
-        $('#feed-status').textContent = 'Server unreachable — retrying';
-      })
-      .then(function () {
+      // Only the fetch is caught here. Rendering runs after, so a bug in a
+      // render path surfaces as itself instead of being reported as a dead
+      // server.
+      .then(
+        function (payload) { return { ok: true, payload: payload }; },
+        function () { return { ok: false }; }
+      )
+      .then(function (result) {
         scoped.classList.remove('is-loading');
+
+        if (!result.ok) {
+          $('#feed-status').textContent = 'Server unreachable — retrying';
+          return;
+        }
+
+        var rows = result.payload && Array.isArray(result.payload.instances)
+          ? result.payload.instances
+          : [];
+        state.instances = rows.map(function (row) {
+          return {
+            id: String(row.id),
+            type: String(row.type || 'unknown'),
+            name: String(row.name || row.id),
+            color: instanceColor(row.type),
+            samples: (Array.isArray(row.samples) ? row.samples : [])
+              .map(normalize)
+              .filter(Boolean)
+              .sort(function (a, b) {
+                return a.t - b.t;
+              })
+          };
+        });
+        labelInstances(state.instances);
+        renderAll();
       });
   }
 
@@ -919,6 +1349,17 @@
 
     wireSegmented('#view-control', function (button) {
       setView(button.getAttribute('data-view'));
+    });
+
+    // Rebuilt on every poll, so the handler lives on the container.
+    $('#instance-control').addEventListener('click', function (event) {
+      var button = event.target.closest('button');
+      if (!button) {
+        return;
+      }
+      state.selected = button.getAttribute('data-instance');
+      state.activeIndex = null;
+      renderAll();
     });
 
     $('#chart').addEventListener('keydown', onChartKeydown);
@@ -937,7 +1378,7 @@
         }
         window.clearTimeout(pending);
         pending = window.setTimeout(function () {
-          renderChart(inRange(state.samples));
+          renderChart(scopedInstances());
         }, 80);
       }).observe($('#plot-wrap'));
     }
