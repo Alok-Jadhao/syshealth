@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SysHealth &middot; Memory pressure</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%232a78d6'/%3E%3Cpath d='M2.5 11L5 7.5l2.5 2.5L10 5l3.5 6' fill='none' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">SysHealth</span>
+    </div>
+    <div class="topbar-right">
+      <p class="feed" id="feed-status" aria-live="polite">Connecting&hellip;</p>
+      <button type="button" class="ghost-btn" id="theme-toggle" aria-label="Switch colour theme">
+        <span id="theme-label">Auto</span>
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <!-- Current state. Not scoped by the range filter: this is always "now". -->
+    <section class="overview" aria-labelledby="overview-heading">
+      <h1 class="section-heading" id="overview-heading">Current state</h1>
+
+      <div class="overview-grid">
+        <div class="hero">
+          <p class="hero-label">Memory pressure (PSI avg10)</p>
+          <p class="hero-figure" id="hero-psi">&mdash;</p>
+          <p class="hero-unit">% of the last 10s with tasks stalled on memory</p>
+          <p class="status-badge" id="status-badge" data-state="unknown">
+            <span class="status-icon" id="status-icon" aria-hidden="true"></span>
+            <span class="status-text" id="status-text">No data</span>
+          </p>
+          <p class="hero-reason" id="hero-reason">Waiting for the SysHealth agent to push its first sample.</p>
+        </div>
+
+        <div class="tiles" role="group" aria-label="Latest sample">
+          <div class="tile">
+            <p class="tile-label">Rolling average</p>
+            <p class="tile-value" id="tile-avg">&mdash;</p>
+            <p class="tile-note">Mean PSI over the analyser window</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Direct scans</p>
+            <p class="tile-value" id="tile-scan">&mdash;</p>
+            <p class="tile-note">pgscan_direct since last sample</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Direct reclaims</p>
+            <p class="tile-value" id="tile-steal">&mdash;</p>
+            <p class="tile-note">pgsteal_direct since last sample</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Samples held</p>
+            <p class="tile-value" id="tile-count">&mdash;</p>
+            <p class="tile-note">In the server&rsquo;s rolling buffer</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- One filter row, above everything it scopes. -->
+    <div class="filterbar">
+      <div class="filter-group" role="group" aria-label="Time range">
+        <span class="filter-label" id="range-label">Range</span>
+        <div class="segmented" id="range-control" role="radiogroup" aria-labelledby="range-label">
+          <button type="button" role="radio" data-minutes="5" aria-checked="false">5m</button>
+          <button type="button" role="radio" data-minutes="15" aria-checked="true" class="is-selected">15m</button>
+          <button type="button" role="radio" data-minutes="60" aria-checked="false">1h</button>
+          <button type="button" role="radio" data-minutes="0" aria-checked="false">All</button>
+        </div>
+      </div>
+
+      <div class="filter-group filter-group-end" role="group" aria-label="View">
+        <div class="segmented" id="view-control" role="radiogroup" aria-label="View">
+          <button type="button" role="radio" data-view="chart" aria-checked="true" class="is-selected">Chart</button>
+          <button type="button" role="radio" data-view="table" aria-checked="false">Table</button>
+        </div>
+      </div>
+    </div>
+
+    <section class="scoped" id="scoped">
+      <figure class="card chart-card" id="chart-card">
+        <figcaption class="card-head">
+          <div>
+            <h2 class="card-title">Memory pressure over time</h2>
+            <p class="card-subtitle" id="chart-subtitle">PSI avg10 per sample, with the analyser&rsquo;s rolling average.</p>
+          </div>
+          <ul class="legend" id="legend">
+            <li>
+              <span class="legend-key legend-key-psi" aria-hidden="true"></span>
+              <span>PSI avg10</span>
+            </li>
+            <li>
+              <span class="legend-key legend-key-avg" aria-hidden="true"></span>
+              <span>Rolling average</span>
+            </li>
+          </ul>
+        </figcaption>
+
+        <div class="plot-wrap" id="plot-wrap">
+          <svg id="chart" class="chart" xmlns="http://www.w3.org/2000/svg"
+               role="img" tabindex="0"
+               aria-label="Line chart of memory pressure over time. Use the left and right arrow keys to read individual samples, or switch to the table view."></svg>
+          <div class="tooltip" id="tooltip" hidden></div>
+          <p class="empty-state" id="empty-state">
+            No samples yet. Start the agent with <code>python3 syshealth.py</code> and point
+            <code>SERVER_URL</code> at this server.
+          </p>
+        </div>
+        <p class="visually-hidden" id="chart-readout" aria-live="polite"></p>
+      </figure>
+
+      <div class="card table-card" id="table-card" hidden>
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">Samples</h2>
+            <p class="card-subtitle">The same data as the chart, newest first.</p>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <caption class="visually-hidden">Memory pressure samples in the selected range</caption>
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col" class="num">PSI avg10</th>
+                <th scope="col" class="num">Rolling avg</th>
+                <th scope="col">State</th>
+                <th scope="col" class="num">Scans &Delta;</th>
+                <th scope="col" class="num">Reclaims &Delta;</th>
+                <th scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>

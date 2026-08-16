@@ -75,7 +75,8 @@ def main():
                 "avg_psi": avg_psi,
                 "pgscan_delta": s_d,
                 "pgsteal_delta": t_d,
-                "reason": reason
+                "reason": reason,
+                "baseline": baseline
             }
 
             push_to_server(payload)
