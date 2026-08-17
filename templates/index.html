@@ -1,225 +1,157 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<title>SysHealth — Instances</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<style>
-  :root {
-    --bg: #0f1115;
-    --panel: #161a22;
-    --border: #232936;
-    --text: #e6e8ec;
-    --muted: #8a93a6;
-    --green: #2bd47a;
-    --yellow: #f5b73a;
-    --red: #ef4f4f;
-    --blue: #4f8cff;
-  }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 24px;
-    background: var(--bg); color: var(--text);
-    font-family: -apple-system, Segoe UI, Roboto, sans-serif;
-  }
-  header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 20px;
-  }
-  h1 { margin: 0; font-size: 22px; }
-  .meta { color: var(--muted); font-size: 13px; }
-  #grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
-    gap: 16px;
-  }
-  .card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 16px;
-  }
-  .card-head {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 12px;
-  }
-  .host { font-weight: 600; font-size: 16px; }
-  .dot {
-    display: inline-block; width: 10px; height: 10px;
-    border-radius: 50%; margin-right: 8px; vertical-align: middle;
-  }
-  .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
-  .dot.offline { background: #555; }
-  .badge {
-    padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600;
-  }
-  .badge.HEALTHY  { background: rgba(43,212,122,.15); color: var(--green); }
-  .badge.DEGRADED { background: rgba(245,183,58,.15); color: var(--yellow); }
-  .badge.CRITICAL { background: rgba(239,79,79,.18);  color: var(--red); }
-  .badge.UNKNOWN  { background: #2a2f3a; color: var(--muted); }
-  .reason { color: var(--muted); font-size: 13px; margin: 4px 0 12px; }
-  .metrics {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px;
-    font-size: 13px; margin-bottom: 12px;
-  }
-  .metrics div span { color: var(--muted); }
-  .chart-wrap { height: 110px; }
-  .empty {
-    color: var(--muted); text-align: center; padding: 60px 0;
-  }
-  #stressBtn {
-    background: #1e2a1e; color: var(--green); border: 1px solid #2a4a2a;
-    border-radius: 8px; padding: 7px 16px; font-size: 13px; font-weight: 600;
-    cursor: pointer; transition: background .15s;
-  }
-  #stressBtn:hover { background: #243024; }
-  #stressBtn:disabled { opacity: .45; cursor: not-allowed; }
-</style>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SysHealth &middot; Memory pressure</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%232a78d6'/%3E%3Cpath d='M2.5 11L5 7.5l2.5 2.5L10 5l3.5 6' fill='none' stroke='white' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 </head>
 <body>
-<header>
-  <h1>SysHealth — Live Instances</h1>
-  <div style="display:flex;align-items:center;gap:16px">
-    <div class="meta">Auto-refresh every 3s · <span id="count">0</span> instance(s)</div>
-    <button id="stressBtn" onclick="runStress()">⚡ Stress All</button>
-  </div>
-</header>
-<div id="stressResult" style="display:none;margin-bottom:14px;padding:10px 14px;background:#1a1f2e;border:1px solid #2a3a5a;border-radius:8px;font-size:13px;color:#8a93a6"></div>
-<div id="grid"></div>
-<div id="empty" class="empty">Waiting for agents to report in…</div>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <span class="brand-name">SysHealth</span>
+    </div>
+    <div class="topbar-right">
+      <p class="feed" id="feed-status" aria-live="polite">Connecting&hellip;</p>
+      <button type="button" class="stress-btn" id="stress-btn">&#9889; Stress all</button>
+      <button type="button" class="ghost-btn" id="theme-toggle" aria-label="Switch colour theme">
+        <span id="theme-label">Auto</span>
+      </button>
+    </div>
+  </header>
 
-<script>
-const charts = {};
+  <p class="stress-result" id="stress-result" role="status" hidden></p>
 
-function fmt(n, d=2) {
-  if (n === undefined || n === null || isNaN(n)) return "—";
-  return Number(n).toFixed(d);
-}
+  <main>
+    <!-- Current state. Not scoped by the range filter: this is always "now". -->
+    <section class="overview" aria-labelledby="overview-heading">
+      <h1 class="section-heading" id="overview-heading">Current state</h1>
 
-function cardHTML(inst) {
-  const latest = inst.latest || {};
-  const state = latest.state || "UNKNOWN";
-  const reason = latest.reason || "No data yet";
-  return `
-    <div class="card-head">
-      <div class="host">
-        <span class="dot ${inst.online ? "online" : "offline"}"></span>
-        ${inst.hostname}
+      <div class="overview-grid" id="overview-single">
+        <div class="hero">
+          <p class="hero-label">
+            Memory pressure (PSI avg10) &middot; <span id="hero-scope">&mdash;</span>
+            <span class="presence" id="hero-presence" data-online="false" hidden></span>
+          </p>
+          <p class="hero-figure" id="hero-psi">&mdash;</p>
+          <p class="hero-unit">% of the last 10s with tasks stalled on memory</p>
+          <p class="status-badge" id="status-badge" data-state="unknown">
+            <span class="status-icon" id="status-icon" aria-hidden="true"></span>
+            <span class="status-text" id="status-text">No data</span>
+          </p>
+          <p class="hero-reason" id="hero-reason">Waiting for the SysHealth agent to push its first sample.</p>
+        </div>
+
+        <div class="tiles" role="group" aria-label="Latest sample">
+          <div class="tile">
+            <p class="tile-label">Rolling average</p>
+            <p class="tile-value" id="tile-avg">&mdash;</p>
+            <p class="tile-note">Mean PSI over the analyser window</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Direct scans</p>
+            <p class="tile-value" id="tile-scan">&mdash;</p>
+            <p class="tile-note">pgscan_direct since last sample</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Direct reclaims</p>
+            <p class="tile-value" id="tile-steal">&mdash;</p>
+            <p class="tile-note">pgsteal_direct since last sample</p>
+          </div>
+          <div class="tile">
+            <p class="tile-label">Samples held</p>
+            <p class="tile-value" id="tile-count">&mdash;</p>
+            <p class="tile-note">In the server&rsquo;s rolling buffer</p>
+          </div>
+        </div>
       </div>
-      <span class="badge ${state}">${state}</span>
+
+      <!-- Comparing instances there is no single headline number, so the
+           hero gives way to one tile per machine. -->
+      <div class="compare-grid" id="overview-compare" hidden
+           role="group" aria-label="Latest sample per instance"></div>
+    </section>
+
+    <!-- One filter row, above everything it scopes. -->
+    <div class="filterbar">
+      <div class="filter-group" role="group" aria-label="Time range">
+        <span class="filter-label" id="range-label">Range</span>
+        <div class="segmented" id="range-control" role="radiogroup" aria-labelledby="range-label">
+          <button type="button" role="radio" data-minutes="5" aria-checked="false">5m</button>
+          <button type="button" role="radio" data-minutes="15" aria-checked="true" class="is-selected">15m</button>
+          <button type="button" role="radio" data-minutes="60" aria-checked="false">1h</button>
+          <button type="button" role="radio" data-minutes="0" aria-checked="false">All</button>
+        </div>
+      </div>
+
+      <div class="filter-group" id="instance-filter" role="group" aria-label="Instance" hidden>
+        <span class="filter-label" id="instance-label">Instance</span>
+        <div class="segmented segmented-keyed" id="instance-control"
+             role="radiogroup" aria-labelledby="instance-label"></div>
+      </div>
+
+      <div class="filter-group filter-group-end" role="group" aria-label="View">
+        <div class="segmented" id="view-control" role="radiogroup" aria-label="View">
+          <button type="button" role="radio" data-view="chart" aria-checked="true" class="is-selected">Chart</button>
+          <button type="button" role="radio" data-view="table" aria-checked="false">Table</button>
+        </div>
+      </div>
     </div>
-    <div class="reason">${reason}${(latest.psi === 0) ? ' <span style="color:#555;font-size:11px">(PSI=0 · instance idle)</span>' : ''}</div>
-    <div class="metrics">
-      <div><span>PSI:</span> ${fmt(latest.psi, 4)}</div>
-      <div><span>Avg PSI:</span> ${fmt(latest.avg_psi, 4)}</div>
-      <div><span>pgscan Δ:</span> ${latest.pgscan_delta ?? "—"}</div>
-      <div><span>pgsteal Δ:</span> ${latest.pgsteal_delta ?? "—"}</div>
-      <div><span>Last seen:</span> ${inst.seconds_since}s ago</div>
-      <div><span>Updated:</span> ${latest.received_at || "—"}</div>
-    </div>
-    <div class="chart-wrap"><canvas id="chart-${inst.hostname}"></canvas></div>
-  `;
-}
 
-async function renderChart(hostname) {
-  const res = await fetch(`/instances/${encodeURIComponent(hostname)}/history`);
-  const history = await res.json();
-  const labels = history.map((_, i) => i + 1);
-  const psi = history.map(h => h.psi);
-  const avg = history.map(h => h.avg_psi);
+    <section class="scoped" id="scoped">
+      <figure class="card chart-card" id="chart-card">
+        <figcaption class="card-head">
+          <div>
+            <h2 class="card-title" id="card-title">Memory pressure over time</h2>
+            <p class="card-subtitle" id="chart-subtitle">PSI avg10 per sample, with the analyser&rsquo;s rolling average.</p>
+          </div>
+          <ul class="legend" id="legend"></ul>
+        </figcaption>
 
-  const ctx = document.getElementById(`chart-${hostname}`);
-  if (!ctx) return;
+        <div class="plot-wrap" id="plot-wrap">
+          <svg id="chart" class="chart" xmlns="http://www.w3.org/2000/svg"
+               role="img" tabindex="0"
+               aria-label="Line chart of memory pressure over time. Use the left and right arrow keys to read individual samples, or switch to the table view."></svg>
+          <div class="tooltip" id="tooltip" hidden></div>
+          <p class="empty-state" id="empty-state">
+            No agents reporting yet. Run <code>python3 syshealth.py</code> on each instance,
+            with <code>SYSHEALTH_SERVER_URL</code> pointing at this server.
+          </p>
+        </div>
+        <p class="visually-hidden" id="chart-readout" aria-live="polite"></p>
+      </figure>
 
-  if (charts[hostname]) {
-    charts[hostname].data.labels = labels;
-    charts[hostname].data.datasets[0].data = psi;
-    charts[hostname].data.datasets[1].data = avg;
-    charts[hostname].update("none");
-    return;
-  }
-  charts[hostname] = new Chart(ctx, {
-    type: "line",
-    data: {
-      labels,
-      datasets: [
-        { label: "PSI", data: psi, borderColor: "#4f8cff", borderWidth: 2,
-          pointRadius: 0, tension: 0.3 },
-        { label: "Avg PSI", data: avg, borderColor: "#2bd47a", borderWidth: 1.5,
-          borderDash: [4,4], pointRadius: 0, tension: 0.3 },
-      ]
-    },
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      plugins: { legend: { labels: { color: "#8a93a6", boxWidth: 10 } } },
-      scales: {
-        x: { display: false },
-        y: {
-          ticks: { color: "#8a93a6" },
-          grid: { color: "#232936" },
-          suggestedMin: 0,
-          suggestedMax: 0.5
-        }
-      }
-    }
-  });
-}
+      <div class="card table-card" id="table-card" hidden>
+        <div class="card-head">
+          <div>
+            <h2 class="card-title">Samples</h2>
+            <p class="card-subtitle">The same data as the chart, newest first.</p>
+          </div>
+        </div>
+        <div class="table-scroll">
+          <table class="data-table">
+            <caption class="visually-hidden">Memory pressure samples in the selected range</caption>
+            <thead>
+              <tr>
+                <th scope="col">Time</th>
+                <th scope="col" id="table-instance-head" hidden>Instance</th>
+                <th scope="col" class="num">PSI avg10</th>
+                <th scope="col" class="num">Rolling avg</th>
+                <th scope="col">State</th>
+                <th scope="col" class="num">Scans &Delta;</th>
+                <th scope="col" class="num">Reclaims &Delta;</th>
+                <th scope="col">Reason</th>
+              </tr>
+            </thead>
+            <tbody id="table-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </main>
 
-async function refresh() {
-  try {
-    const res = await fetch("/instances");
-    const list = await res.json();
-    document.getElementById("count").textContent = list.length;
-    document.getElementById("empty").style.display = list.length ? "none" : "block";
-
-    const grid = document.getElementById("grid");
-    const seen = new Set();
-    for (const inst of list) {
-      seen.add(inst.hostname);
-      let el = document.getElementById(`card-${inst.hostname}`);
-      if (!el) {
-        el = document.createElement("div");
-        el.className = "card";
-        el.id = `card-${inst.hostname}`;
-        grid.appendChild(el);
-      }
-      el.innerHTML = cardHTML(inst);
-      renderChart(inst.hostname);
-    }
-    // remove stale cards
-    [...grid.children].forEach(c => {
-      const host = c.id.replace("card-", "");
-      if (!seen.has(host)) {
-        c.remove();
-        delete charts[host];
-      }
-    });
-  } catch (e) {
-    console.error("refresh failed", e);
-  }
-}
-
-async function runStress() {
-  const btn = document.getElementById("stressBtn");
-  const result = document.getElementById("stressResult");
-  btn.disabled = true;
-  btn.textContent = "Sending...";
-  try {
-    const res = await fetch("/run-stress", { method: "POST" });
-    const data = await res.json();
-    const lines = Object.entries(data).map(([h, s]) => `${h}: ${s}`).join(" · ");
-    result.textContent = "Stress launched → " + lines;
-    result.style.display = "block";
-    setTimeout(() => { result.style.display = "none"; }, 8000);
-  } catch (e) {
-    result.textContent = "Error: " + e;
-    result.style.display = "block";
-  }
-  setTimeout(() => { btn.disabled = false; btn.textContent = "⚡ Stress All"; }, 125000);
-}
-
-refresh();
-setInterval(refresh, 3000);
-</script>
+  <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>

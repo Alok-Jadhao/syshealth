@@ -1,0 +1,770 @@
+/* SysHealth dashboard
+   Colour roles are declared once here and referenced by role everywhere else,
+   so the light/dark swap happens in one place. */
+
+:root {
+  color-scheme: light;
+
+  --plane: #f9f9f7;
+  --surface-1: #fcfcfb;
+  --text-primary: #0b0b0b;
+  --text-secondary: #52514e;
+  --text-muted: #898781;
+  --gridline: #e1e0d9;
+  --axis: #c3c2b7;
+  --border: rgba(11, 11, 11, 0.1);
+  --hover-wash: rgba(11, 11, 11, 0.04);
+
+  /* Chart series: one hue for the measure that matters, de-emphasis grey for
+     the context line. */
+  --series-psi: #2a78d6;
+  --series-avg: #898781;
+
+  /* Instance sizes are an ordered scale, so they get one hue stepped
+     light to dark rather than four unrelated colours. The step is fixed per
+     size: selecting one instance never repaints another. */
+  --size-micro: #86b6ef;
+  --size-small: #5598e7;
+  --size-medium: #2a78d6;
+  --size-large: #184f95;
+  /* Off the size ladder (an agent that never reported a type). A separate hue,
+     not another step, so it never reads as a size. */
+  --size-other: #eb6834;
+
+  /* Status scale: reserved meaning, never reused for a series. */
+  --status-good: #0ca30c;
+  --status-warning: #fab219;
+  --status-serious: #ec835a;
+  --status-critical: #d03b3b;
+
+  --radius: 10px;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --plane: #0d0d0d;
+    --surface-1: #1a1a19;
+    --text-primary: #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted: #898781;
+    --gridline: #2c2c2a;
+    --axis: #383835;
+    --border: rgba(255, 255, 255, 0.1);
+    --hover-wash: rgba(255, 255, 255, 0.06);
+
+    --series-psi: #3987e5;
+    --series-avg: #898781;
+
+    --size-micro: #b7d3f6;
+    --size-small: #6da7ec;
+    --size-medium: #2a78d6;
+    --size-large: #184f95;
+    --size-other: #d95926;
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --plane: #0d0d0d;
+  --surface-1: #1a1a19;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --text-muted: #898781;
+  --gridline: #2c2c2a;
+  --axis: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --hover-wash: rgba(255, 255, 255, 0.06);
+
+  --series-psi: #3987e5;
+  --series-avg: #898781;
+
+  --size-micro: #b7d3f6;
+  --size-small: #6da7ec;
+  --size-medium: #2a78d6;
+  --size-large: #184f95;
+  --size-other: #d95926;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+/* A class that sets `display` would otherwise beat the hidden attribute, and
+   several components here are shown and hidden by it. */
+[hidden] {
+  display: none !important;
+}
+
+body {
+  margin: 0;
+  background: var(--plane);
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- top bar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-1);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  background: var(--series-psi);
+}
+
+.brand-name {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.feed {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.feed[data-stale="true"] {
+  color: var(--text-secondary);
+}
+
+.ghost-btn {
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.ghost-btn:hover {
+  background: var(--hover-wash);
+}
+
+.ghost-btn:focus-visible,
+.segmented button:focus-visible,
+.chart:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+/* Triggers a load on every agent, so it reads as an action, not a filter. */
+.stress-btn {
+  border: 1px solid var(--border);
+  background: var(--hover-wash);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.stress-btn:hover:not(:disabled) {
+  background: var(--surface-1);
+  border-color: var(--text-muted);
+}
+
+.stress-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.stress-btn:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+.stress-result {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  max-width: 1120px;
+  margin: 12px auto -8px;
+  padding: 10px 24px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Whether an agent is still reporting. The shape changes with the state, so
+   the colour is never carrying it alone. */
+.presence {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+  background: var(--status-good);
+}
+
+.presence[data-online="false"] {
+  background: transparent;
+  border: 1.5px solid var(--text-muted);
+}
+
+/* ---------- layout ---------- */
+
+main {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.section-heading {
+  margin: 0 0 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.overview-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) 1fr;
+  gap: 16px;
+  align-items: stretch;
+}
+
+@media (max-width: 860px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.hero,
+.tile,
+.card {
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.hero {
+  padding: 20px;
+}
+
+.hero-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.hero-figure {
+  /* Proportional figures: tabular-nums makes a large number look loose. */
+  margin: 4px 0 0;
+  font-size: 56px;
+  line-height: 1.05;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.hero-unit {
+  margin: 2px 0 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 5px 12px 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The status colour never carries the meaning alone: it rides an icon that
+   changes shape per state, next to the state's name in ink. */
+.status-icon {
+  width: 10px;
+  height: 10px;
+  background: var(--text-muted);
+}
+
+.status-badge[data-state="healthy"] .status-icon {
+  background: var(--status-good);
+  border-radius: 50%;
+}
+
+.status-badge[data-state="degraded"] .status-icon {
+  background: var(--status-warning);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.status-badge[data-state="critical"] .status-icon {
+  background: var(--status-critical);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+.status-badge[data-state="unknown"] .status-icon {
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.hero-reason {
+  margin: 12px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+}
+
+.tile {
+  padding: 16px;
+}
+
+.tile-label {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tile-value {
+  margin: 6px 0 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.tile-note {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+/* ---------- comparison tiles ---------- */
+
+.compare-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.cmp-tile {
+  padding: 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.cmp-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.cmp-type {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-head .presence {
+  margin-left: auto;
+}
+
+.cmp-host {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-value {
+  margin: 6px 0 0;
+  font-size: 32px;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.cmp-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cmp-note {
+  margin: 6px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- filter row ---------- */
+
+.filterbar {
+  display: flex;
+  align-items: center;
+  gap: 12px 20px;
+  flex-wrap: wrap;
+  margin: 28px 0 14px;
+}
+
+.filter-group-end {
+  margin-left: auto;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  /* Lets a long control shrink and scroll inside itself rather than pushing
+     the page sideways. */
+  min-width: 0;
+  max-width: 100%;
+}
+
+.filter-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-1);
+  /* Shrink into whatever the row's label leaves, then scroll inside itself —
+     a percentage max-width would ignore the label and push the page sideways. */
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.segmented::-webkit-scrollbar {
+  display: none;
+}
+
+.segmented button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.segmented-keyed button {
+  font-variant-numeric: tabular-nums;
+}
+
+.segmented button:hover {
+  background: var(--hover-wash);
+}
+
+.segmented button.is-selected {
+  background: var(--hover-wash);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* ---------- cards ---------- */
+
+.scoped {
+  transition: opacity 120ms ease-out;
+}
+
+/* Refetch holds the previous render rather than flashing a skeleton. */
+.scoped.is-loading {
+  opacity: 0.6;
+}
+
+.card {
+  padding: 18px;
+}
+
+.chart-card {
+  margin: 0;
+}
+
+.card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.card-subtitle {
+  margin: 2px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.legend {
+  display: flex;
+  align-items: center;
+  /* Wraps rather than pushing the page sideways once a fleet has more than a
+     few machines in it. */
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+/* Legends mirror the mark: a line key for a line series. The colour is set
+   inline from the series, so the dash pattern has to come from a mask. */
+.legend-key {
+  flex: none;
+  width: 16px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--series-psi);
+}
+
+.legend-key-dashed {
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 9px);
+  mask-image: repeating-linear-gradient(90deg, #000 0 5px, transparent 5px 9px);
+}
+
+/* ---------- plot ---------- */
+
+.plot-wrap {
+  position: relative;
+}
+
+.chart {
+  display: block;
+  width: 100%;
+  touch-action: pan-y;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 44px 8px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.empty-state code {
+  font-family: var(--mono);
+  font-size: 12px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--hover-wash);
+}
+
+.tooltip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  min-width: 168px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.14);
+  pointer-events: none;
+}
+
+.tt-time {
+  margin: 0 0 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.tt-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+/* Values lead, labels follow. */
+.tt-value {
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  min-width: 52px;
+}
+
+.tt-name {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.tt-key {
+  flex: none;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  align-self: center;
+  background: var(--series-psi);
+}
+
+.tt-state {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tt-reason {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+/* ---------- table view ---------- */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.data-table th,
+.data-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.data-table th {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-table tbody tr:hover {
+  background: var(--hover-wash);
+}
+
+.data-table .reason {
+  white-space: normal;
+  color: var(--text-secondary);
+  min-width: 200px;
+}
+
+.state-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.state-dot {
+  width: 8px;
+  height: 8px;
+  background: var(--text-muted);
+}
+
+.state-dot[data-state="healthy"] {
+  background: var(--status-good);
+  border-radius: 50%;
+}
+
+.state-dot[data-state="degraded"] {
+  background: var(--status-warning);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+
+.state-dot[data-state="critical"] {
+  background: var(--status-critical);
+  clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}

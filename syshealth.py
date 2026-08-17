@@ -1,3 +1,4 @@
+import os
 import time
 import json
 import socket
@@ -6,12 +7,13 @@ import sys
 import threading
 import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
+import instance
 from collector import Collector
 from analyzer import Analyzer
 from reporter import Reporter
 
 HOSTNAME = socket.gethostname()
-SERVER_URL = "http://13.61.11.18:5000/metrics"
+SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://13.61.11.18:5000/metrics")
 CONTROL_PORT = 5001
 
 
@@ -64,8 +66,10 @@ def main():
     collector = Collector()
     analyzer = Analyzer()
     reporter = Reporter()
+    identity = instance.detect()
 
     print(f"SysHealth started | control port {CONTROL_PORT}")
+    print(f"Instance: {identity['instance_type']} ({HOSTNAME})")
     print("-" * 50)
 
     try:
@@ -82,7 +86,12 @@ def main():
                 "avg_psi": avg_psi,
                 "pgscan_delta": s_d,
                 "pgsteal_delta": t_d,
-                "reason": reason
+                "reason": reason,
+                # What the dashboard groups, orders and colours machines by,
+                # and what the threshold lines are drawn from.
+                "instance_type": identity["instance_type"],
+                "instance_id": identity["instance_id"],
+                "baseline": analyzer.baseline
             }
             push_to_server(payload)
             time.sleep(5)

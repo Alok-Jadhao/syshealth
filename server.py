@@ -5,14 +5,20 @@ import time
 import requests
 from flask import Flask, request, jsonify, render_template
 
+import instance
+
 app = Flask(__name__)
 
-HISTORY_LIMIT = 60
+# One hour of history at one push per 5s, so the dashboard's longest range has
+# something to draw.
+HISTORY_LIMIT = 720
 ONLINE_WINDOW_SEC = 15
 AGENT_CONTROL_PORT = 5001
 
 instances = defaultdict(lambda: {
     "hostname": None,
+    "instance_type": "unknown",
+    "instance_id": None,
     "agent_ip": None,
     "last_seen": 0.0,
     "latest": None,
@@ -30,6 +36,9 @@ def receive_metrics():
     data = request.json or {}
     hostname = data.get("hostname") or "unknown"
     data["received_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    # Epoch seconds as well, so the dashboard can place samples on a time axis
+    # without re-parsing the display string or trusting the agent's clock.
+    data["received_ts"] = time.time()
 
     inst = instances[hostname]
     inst["hostname"] = hostname
@@ -38,7 +47,23 @@ def receive_metrics():
     inst["latest"] = data
     inst["history"].append(data)
 
+    # An agent that knows what it runs on lets the dashboard group and order
+    # machines by size; older agents simply stay "unknown".
+    if data.get("instance_type"):
+        inst["instance_type"] = data["instance_type"]
+    if data.get("instance_id"):
+        inst["instance_id"] = data["instance_id"]
+
     return jsonify({"status": "received"}), 200
+
+
+def by_size(entry):
+    """Smallest instance first, so the dashboard reads as a size ladder."""
+    return (
+        instance.size_rank(entry.get("instance_type")),
+        entry.get("instance_type") or "",
+        entry.get("hostname") or "",
+    )
 
 
 @app.route("/instances", methods=["GET"])
@@ -49,12 +74,14 @@ def list_instances():
         online = (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC
         result.append({
             "hostname": host,
+            "instance_type": inst["instance_type"],
+            "instance_id": inst["instance_id"],
             "online": online,
             "last_seen": inst["last_seen"],
             "seconds_since": round(now - inst["last_seen"], 1),
             "latest": inst["latest"],
         })
-    result.sort(key=lambda x: x["hostname"])
+    result.sort(key=by_size)
     return jsonify(result)
 
 
@@ -64,6 +91,30 @@ def instance_history(hostname):
     if not inst:
         return jsonify([])
     return jsonify(list(inst["history"]))
+
+
+@app.route("/series", methods=["GET"])
+def series():
+    """Every instance's recent history in one response — what the graph reads."""
+    try:
+        limit = int(request.args.get("limit", HISTORY_LIMIT))
+    except ValueError:
+        limit = HISTORY_LIMIT
+    limit = max(1, min(limit, HISTORY_LIMIT))
+
+    now = time.time()
+    payload = []
+    for host, inst in instances.items():
+        payload.append({
+            "hostname": host,
+            "instance_type": inst["instance_type"],
+            "instance_id": inst["instance_id"],
+            "online": (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC,
+            "seconds_since": round(now - inst["last_seen"], 1),
+            "samples": list(inst["history"])[-limit:],
+        })
+    payload.sort(key=by_size)
+    return jsonify({"instances": payload})
 
 
 @app.route("/run-stress", methods=["POST"])
