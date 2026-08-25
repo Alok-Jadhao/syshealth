@@ -26,8 +26,9 @@ this package resolves to the SDK, as intended.
 
 from __future__ import annotations
 
+from .fleet import build_fleet_tools
 from .sources import LiveSource, MetricSource, ReplaySource, load_run
-from .tools import Tier, Tool, build_tools
+from .tools import Tier, Tool, ToolInputError, build_tools
 
 __all__ = [
     "LiveSource",
@@ -35,6 +36,8 @@ __all__ = [
     "ReplaySource",
     "Tier",
     "Tool",
+    "ToolInputError",
+    "build_fleet_tools",
     "build_tools",
     "load_run",
 ]

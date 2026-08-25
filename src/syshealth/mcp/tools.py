@@ -97,7 +97,9 @@ def _window(window_s: float) -> float:
     return float(window_s)
 
 
-def _r(value: float, places: int = 2) -> float:
+def compact(value: float, places: int = 2) -> float:
+    """Round for a reader. Fourteen decimal places of a stall percentage are
+    noise in a payload someone — or something — has to reason over."""
     return round(float(value), places)
 
 
@@ -131,7 +133,7 @@ def _envelope(source: MetricSource, sample: Interval) -> dict[str, Any]:
     """
     return {
         "source": source.name,
-        "measured_s": _r(sample.duration_s, 3),
+        "measured_s": compact(sample.duration_s, 3),
         "psi_available": sample.psi_available,
     }
 
@@ -150,8 +152,8 @@ def build_tools(source: MetricSource, thresholds: Thresholds | None = None) -> d
         for resource in ("memory", "cpu", "io"):
             resources[resource] = {
                 "state": classify(sample, resource, t).value,
-                "some_stall_pct": _r(sample.some(resource)),
-                "full_stall_pct": _r(sample.full(resource)),
+                "some_stall_pct": compact(sample.some(resource)),
+                "full_stall_pct": compact(sample.full(resource)),
             }
 
         worst = max(
@@ -179,27 +181,27 @@ def build_tools(source: MetricSource, thresholds: Thresholds | None = None) -> d
         some = sample.some("memory")
         result["saturation"] = {
             "state": classify(sample, "memory", t).value,
-            "some_stall_pct": _r(some),
-            "full_stall_pct": _r(sample.full("memory")),
-            "stalled_seconds": _r(some / 100.0 * sample.duration_s, 3),
+            "some_stall_pct": compact(some),
+            "full_stall_pct": compact(sample.full("memory")),
+            "stalled_seconds": compact(some / 100.0 * sample.duration_s, 3),
         }
         result["utilisation"] = {
-            "working_set_pct": _r(sample.mem_used_pct),
-            "naive_used_pct": _r(sample.mem_naive_used_pct),
-            "swap_used_pct": _r(sample.swap_used_pct),
-            "total_gb": _r(sample.mem_total_kb / (1024 * 1024), 3),
+            "working_set_pct": compact(sample.mem_used_pct),
+            "naive_used_pct": compact(sample.mem_naive_used_pct),
+            "swap_used_pct": compact(sample.swap_used_pct),
+            "total_gb": compact(sample.mem_total_kb / (1024 * 1024), 3),
         }
 
         divergence = sample.mem_naive_used_pct - some
-        result["divergence_pct_points"] = _r(divergence)
+        result["divergence_pct_points"] = compact(divergence)
         if _quiet_high_utilisation(sample, t):
             # Scoped to this window on purpose. An early quiet window in a run
             # that is otherwise thrashing will land here, and prose asserting
             # the machine is "healthy" would be manufactured reassurance about
             # a box in real trouble.
             result["divergence_note"] = (
-                f"In this window naive_used_pct was {_r(sample.mem_naive_used_pct)}% "
-                f"while memory stalled {_r(some)}% of the wall clock, with no "
+                f"In this window naive_used_pct was {compact(sample.mem_naive_used_pct)}% "
+                f"while memory stalled {compact(some)}% of the wall clock, with no "
                 "reclaim or swap-in. Page cache counts toward naive_used_pct, so "
                 "that figure alone is not evidence of a memory problem. This "
                 "describes one window: check get_reclaim_activity and further "
@@ -214,9 +216,9 @@ def build_tools(source: MetricSource, thresholds: Thresholds | None = None) -> d
         result = _envelope(source, sample)
         result["saturation"] = {
             "state": classify(sample, "cpu", t).value,
-            "some_stall_pct": _r(sample.some("cpu")),
+            "some_stall_pct": compact(sample.some("cpu")),
         }
-        result["utilisation"] = {"busy_pct": _r(sample.cpu_busy_pct)}
+        result["utilisation"] = {"busy_pct": compact(sample.cpu_busy_pct)}
         result["note"] = (
             "busy_pct is how much of the CPU was occupied; some_stall_pct is how "
             "much of the wall clock runnable tasks spent waiting for it. Only the "
@@ -236,7 +238,7 @@ def build_tools(source: MetricSource, thresholds: Thresholds | None = None) -> d
         direct_per_s = counts.get("pgscan_direct", 0) / duration
 
         result["counts"] = counts
-        result["direct_reclaim_per_s"] = _r(direct_per_s)
+        result["direct_reclaim_per_s"] = compact(direct_per_s)
         result["sustained_direct_reclaim"] = direct_per_s >= t.direct_reclaim_per_s
         result["oom_kills"] = counts.get("oom_kill", 0)
         result["note"] = (

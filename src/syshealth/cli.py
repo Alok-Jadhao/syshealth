@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -336,7 +337,7 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     Nothing is printed to stdout here: on stdio, stdout is the JSON-RPC
     channel and anything else on it corrupts the session.
     """
-    settings = load_settings(args.config, proc_root=args.proc_root)
+    settings = load_settings(args.config, proc_root=args.proc_root, db_path=args.db)
 
     try:
         from .mcp.server import run_server as run_mcp
@@ -349,18 +350,51 @@ def cmd_mcp(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     from .mcp.sources import LiveSource, ReplaySource, load_run
+    from .mcp.tools import build_tools
 
-    source: object
-    if args.replay:
+    tools: dict = {}
+    notes: list[str] = []
+
+    if args.db:
+        from .mcp.fleet import build_fleet_tools
+        from .store import Store
+
         try:
-            source = ReplaySource(load_run(args.replay), label=Path(args.replay).name)
-        except (OSError, ValueError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
+            # Read-only: this process observes the fleet, it does not record
+            # into it. A missing file fails here rather than silently becoming
+            # a new empty database that reports an empty fleet.
+            store = Store(args.db, read_only=True)
+            catalog = Catalog.load(args.catalog or settings.catalog_path or None)
+        except (sqlite3.Error, ValueError) as exc:
+            print(f"error: could not open {args.db} for reading: {exc}", file=sys.stderr)
             return EXIT_ERROR
-    else:
-        source = LiveSource(settings.proc_root)
 
-    return run_mcp(source)  # type: ignore[arg-type]
+        tools |= build_fleet_tools(store, catalog)
+        notes.append(f"fleet: {args.db} (read-only), {store.count()} samples stored")
+
+    if not args.fleet_only:
+        if args.replay:
+            try:
+                source = ReplaySource(load_run(args.replay), label=Path(args.replay).name)
+            except (OSError, ValueError) as exc:
+                print(f"error: {exc}", file=sys.stderr)
+                return EXIT_ERROR
+        else:
+            source = LiveSource(settings.proc_root)
+            if not source.psi_available:
+                notes.append(
+                    "warning: no PSI on this kernel — the local tools will report "
+                    "psi_available=false and state UNKNOWN. Use --replay to serve "
+                    "a recorded run instead."
+                )
+        tools |= build_tools(source)
+        notes.append(f"local: {source.name}")
+
+    if not tools:
+        print("error: --fleet-only needs --db", file=sys.stderr)
+        return EXIT_ERROR
+
+    return run_mcp(tools, notes)
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -469,6 +503,19 @@ def build_parser() -> argparse.ArgumentParser:
             "demonstrate a saturated machine without saturating one"
         ),
     )
+    mcp.add_argument(
+        "--db",
+        help=(
+            "also expose fleet tools over this sqlite database, opened "
+            "read-only. This is the telemetry agents push to 'syshealth serve'"
+        ),
+    )
+    mcp.add_argument(
+        "--fleet-only",
+        action="store_true",
+        help="omit the tools that measure this machine (needs --db)",
+    )
+    mcp.add_argument("--catalog", help="instance catalog JSON for sizing verdicts")
     mcp.set_defaults(func=cmd_mcp)
 
     serve = sub.add_parser("serve", help="run the fleet server and dashboard")

@@ -22,10 +22,9 @@ from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from .. import __version__
-from .sources import MetricSource
-from .tools import ToolInputError, build_tools
+from .tools import Tool, ToolInputError
 
-INSTRUCTIONS = """\
+BASE_INSTRUCTIONS = """\
 SysHealth measures whether a Linux machine is *saturated* — the share of
 wall-clock time its tasks spent unable to make progress — using kernel
 Pressure Stall Information.
@@ -37,14 +36,46 @@ idle RAM with page cache, so a healthy server routinely reports 90%+ memory
 in continuous reclaim. Diagnose from the stall percentages. Treat utilisation
 as context only.
 
-Every tool measures a fresh window and reports how long it measured for and
-where the data came from. A `source` beginning with `replay:` is a recording,
-not a live machine. If `psi_available` is false, nothing was measured and the
-state is UNKNOWN — that is not the same as healthy.
+If `psi_available` is false, nothing was measured and the state is UNKNOWN —
+that is not the same as healthy.
 
 All tools here are read-only. Nothing in this server can change the state of
-the machine.
+any machine.
 """
+
+LOCAL_INSTRUCTIONS = """\
+The get_* tools taking `window_s` measure THIS machine over one fresh window,
+and report how long they measured for and where the data came from. A `source`
+beginning with `replay:` is a recording, not a live machine. One short window
+is a weak signal: a calm window does not exonerate a thrashing box, and a
+single spike does not condemn a healthy one.
+"""
+
+FLEET_INSTRUCTIONS = """\
+The node and fleet tools read stored telemetry pushed by agents across the
+fleet. They fold a node's whole history into percentiles, which is much
+stronger evidence than any single window, so prefer get_node_health over a
+live reading when a node name is available. Start from list_nodes or
+get_fleet_summary to find which node is worth investigating.
+"""
+
+
+# Which set is present is decided by naming one tool from each, not by
+# pattern-matching the names: "get_fleet_summary" starts with get_ and has no
+# "node" in it, so any such heuristic would advertise local instructions to a
+# fleet-only server and mislead the model about what it is looking at.
+LOCAL_MARKER = "get_health"
+FLEET_MARKER = "list_nodes"
+
+
+def instructions_for(tools: dict[str, Tool]) -> str:
+    """Describe only the tools this process actually registered."""
+    parts = [BASE_INSTRUCTIONS]
+    if LOCAL_MARKER in tools:
+        parts.append(LOCAL_INSTRUCTIONS)
+    if FLEET_MARKER in tools:
+        parts.append(FLEET_INSTRUCTIONS)
+    return "\n".join(parts)
 
 
 def _surface_input_errors(handler: Callable[..., Any]) -> Callable[..., Any]:
@@ -71,15 +102,15 @@ def _surface_input_errors(handler: Callable[..., Any]) -> Callable[..., Any]:
     return wrapper
 
 
-def build_server(source: MetricSource) -> MCPServer:
-    """Register every tool against one measurement source."""
+def build_server(tools: dict[str, Tool]) -> MCPServer:
+    """Register a composed set of tools. The caller decides which sets."""
     server = MCPServer(
         name="syshealth",
         version=__version__,
-        instructions=INSTRUCTIONS,
+        instructions=instructions_for(tools),
     )
 
-    for tool in build_tools(source).values():
+    for tool in tools.values():
         server.add_tool(
             _surface_input_errors(tool.handler),
             name=tool.name,
@@ -96,19 +127,15 @@ def build_server(source: MetricSource) -> MCPServer:
     return server
 
 
-def run_server(source: MetricSource) -> int:
-    tools = build_tools(source)
+def run_server(tools: dict[str, Tool], notes: list[str] | None = None) -> int:
+    tiers = sorted({tool.tier.value for tool in tools.values()})
     print(
-        f"syshealth mcp: {len(tools)} read-only tools over {source.name}",
+        f"syshealth mcp: {len(tools)} tools ({', '.join(tiers)}) — "
+        f"{', '.join(sorted(tools))}",
         file=sys.stderr,
     )
-    if not getattr(source, "psi_available", True):
-        print(
-            "warning: no PSI on this kernel — every tool will report "
-            "psi_available=false and state UNKNOWN. Use --replay to serve a "
-            "recorded run instead.",
-            file=sys.stderr,
-        )
+    for note in notes or []:
+        print(note, file=sys.stderr)
 
-    build_server(source).run(transport="stdio")
+    build_server(tools).run(transport="stdio")
     return 0

@@ -45,10 +45,32 @@ class Store:
     handles, and the simplicity is worth more than the throughput here.
     """
 
-    def __init__(self, path: str | Path = "syshealth.db", retention_s: float = 86_400) -> None:
+    def __init__(
+        self,
+        path: str | Path = "syshealth.db",
+        retention_s: float = 86_400,
+        read_only: bool = False,
+    ) -> None:
+        """``read_only`` opens the file with SQLite's ``mode=ro``.
+
+        For consumers that only ever observe — the MCP tool layer — this makes
+        that guarantee structural rather than a promise about which methods
+        they happen to call. It also turns a mistyped path into an error
+        instead of a brand new empty database silently reporting an empty
+        fleet, which is the more dangerous failure of the two.
+        """
         self.path = str(path)
         self.retention_s = retention_s
+        self.read_only = read_only
         self._lock = threading.Lock()
+
+        if read_only:
+            self._conn = sqlite3.connect(
+                f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
+            )
+            self._conn.row_factory = sqlite3.Row
+            return
+
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         # WAL lets the dashboard read while agents are writing.

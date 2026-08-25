@@ -17,8 +17,12 @@ pytest.importorskip("mcp", reason="needs the mcp extra: pip install 'syshealth[m
 
 from mcp.server.mcpserver.exceptions import ToolError  # noqa: E402
 
-from syshealth.mcp import ReplaySource, load_run  # noqa: E402
-from syshealth.mcp.server import _surface_input_errors, build_server  # noqa: E402
+from syshealth.mcp import ReplaySource, build_tools, load_run  # noqa: E402
+from syshealth.mcp.server import (  # noqa: E402
+    _surface_input_errors,
+    build_server,
+    instructions_for,
+)
 from syshealth.mcp.tools import ToolInputError  # noqa: E402
 
 RUNS = Path(__file__).parent / "fixtures" / "runs"
@@ -29,13 +33,18 @@ def source() -> ReplaySource:
     return ReplaySource(load_run(RUNS / "cache-heavy.jsonl"), label="cache-heavy")
 
 
-def registered(source: ReplaySource) -> dict:
+@pytest.fixture
+def local_tools(source: ReplaySource) -> dict:
+    return build_tools(source)
+
+
+def registered(tools: dict) -> dict:
     """``MCPServer.list_tools`` is a coroutine; the suite has no async plugin."""
-    return {t.name: t for t in asyncio.run(build_server(source).list_tools())}
+    return {t.name: t for t in asyncio.run(build_server(tools).list_tools())}
 
 
-def test_every_tool_is_registered_and_advertised_read_only(source: ReplaySource):
-    tools = registered(source)
+def test_every_tool_is_registered_and_advertised_read_only(local_tools: dict):
+    tools = registered(local_tools)
 
     assert set(tools) == {
         "get_health",
@@ -49,16 +58,36 @@ def test_every_tool_is_registered_and_advertised_read_only(source: ReplaySource)
         assert tool.annotations.destructive_hint is False, name
 
 
-def test_the_wrapper_does_not_hide_the_tools_schema(source: ReplaySource):
+def test_the_wrapper_does_not_hide_the_tools_schema(local_tools: dict):
     """``functools.wraps`` is what keeps the derived schema intact.
 
     Without ``__wrapped__`` the SDK would see ``(*args, **kwargs)`` and
     advertise a tool taking anything at all.
     """
-    for tool in registered(source).values():
+    for tool in registered(local_tools).values():
         properties = tool.input_schema.get("properties", {})
         assert "window_s" in properties, tool.name
         assert properties["window_s"]["type"] == "number", tool.name
+
+
+def test_instructions_describe_only_the_tools_that_are_registered(local_tools: dict):
+    """A fleet-only server must not tell the model it can measure "this
+    machine". The names are checked explicitly because get_fleet_summary would
+    satisfy any get_*-shaped heuristic and quietly reintroduce that claim."""
+    from syshealth.mcp import build_fleet_tools
+    from syshealth.store import Store
+
+    fleet_tools = build_fleet_tools(Store(":memory:"))
+
+    local_only = instructions_for(local_tools)
+    fleet_only = instructions_for(fleet_tools)
+    both = instructions_for({**local_tools, **fleet_tools})
+
+    assert "THIS machine" in local_only and "across the\nfleet" not in local_only
+    assert "THIS machine" not in fleet_only and "fleet" in fleet_only
+    assert "THIS machine" in both and "list_nodes" in both
+    # The saturation-vs-utilisation framing is not optional in any of them.
+    assert all("Saturation is not utilisation" in text for text in (local_only, fleet_only, both))
 
 
 def test_an_anticipated_rejection_keeps_its_message():
@@ -82,10 +111,8 @@ def test_an_unexpected_crash_is_not_dressed_up_as_a_tool_error():
         _surface_input_errors(handler)()
 
 
-def test_a_valid_call_passes_straight_through(source: ReplaySource):
-    from syshealth.mcp import build_tools
-
-    handler = _surface_input_errors(build_tools(source)["get_health"].handler)
+def test_a_valid_call_passes_straight_through(local_tools: dict):
+    handler = _surface_input_errors(local_tools["get_health"].handler)
     result = handler(window_s=2.0)
 
     assert result["source"] == "replay:cache-heavy"

@@ -133,20 +133,42 @@ pip install -e '.[mcp]'
 claude mcp add syshealth -- syshealth mcp
 ```
 
+**This machine**, measured over one fresh window per call:
+
 | Tool | Returns |
 | ---- | ------- |
-| `get_health` | per-resource state and the bottleneck, over one measured window |
+| `get_health` | per-resource state and the bottleneck |
 | `get_memory_pressure` | memory saturation and both utilisation figures, side by side |
 | `get_cpu_pressure` | CPU stall next to CPU busy |
 | `get_reclaim_activity` | direct reclaim, major faults, swap, OOM kills |
 
+**The fleet**, over telemetry agents have already pushed — add `--db`:
+
+```bash
+syshealth mcp --db fleet.db              # this machine and the fleet
+syshealth mcp --db fleet.db --fleet-only # the fleet alone
+```
+
+| Tool | Returns |
+| ---- | ------- |
+| `list_nodes` | every machine the server has heard from, and whether it still is |
+| `get_node_health` | one node's saturation folded into percentiles across its history |
+| `get_node_verdict` | what size it should be, with `reasons`, `evidence` and `caveats` kept apart |
+| `get_fleet_summary` | states, sizings, total monthly delta, and what to investigate first |
+
+Prefer the fleet tools when a node name is available. A p95 over minutes of
+stored history cannot be fooled by one calm window the way a single live
+reading can — a two-second look at a thrashing box quite often reads fine.
+
 Every tool is **read-only** — advertised to the client with MCP's
 `readOnlyHint` — and nothing in this server can change the state of a machine.
 Tools carry a permission tier (`READ_ONLY`, `LOW_RISK`, `HIGH_RISK`) from which
-those hints are derived; only the first is in use today.
+those hints are derived; only the first is in use today. `--db` opens the
+database with SQLite's `mode=ro`, so read-only is structural rather than a
+promise about which methods get called.
 
-Each response names where its data came from and how long it measured for, so a
-replayed recording can never be mistaken for a live machine:
+Each local response names where its data came from and how long it measured
+for, so a replayed recording can never be mistaken for a live machine:
 
 ```bash
 syshealth mcp --replay tests/fixtures/runs/thrashing.jsonl
@@ -154,7 +176,7 @@ syshealth mcp --replay tests/fixtures/runs/thrashing.jsonl
 
 That flag is how the tools are exercised without a PSI kernel, and the only way
 to demonstrate a saturated machine without saturating one. `make mcp-smoke`
-runs a real client against it end to end.
+runs a real client against both modes end to end.
 
 The tool descriptions deliberately tell the model to diagnose from saturation
 and treat utilisation as context. A tool schema is a prompt: handing a model
@@ -241,9 +263,13 @@ src/syshealth/
   cli.py        argparse entry point
   mcp/
     sources.py  where a tool measures from: live /proc, or a recorded run
-    tools.py    the tools themselves; imports no MCP SDK, so it stays testable
+    tools.py    tools for this machine; imports no MCP SDK, so it stays testable
+    fleet.py    tools over the stored fleet telemetry; also SDK-free
     server.py   the only module that touches the SDK
 ```
+
+`PHASES.md` tracks what is built and what is planned on the way to autonomous
+incident response.
 
 ## Limitations
 
