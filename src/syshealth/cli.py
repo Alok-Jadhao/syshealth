@@ -330,6 +330,39 @@ def cmd_agent(args: argparse.Namespace) -> int:
     return run_agent(settings)
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    """Serve the read-only measurement tools over MCP on stdio.
+
+    Nothing is printed to stdout here: on stdio, stdout is the JSON-RPC
+    channel and anything else on it corrupts the session.
+    """
+    settings = load_settings(args.config, proc_root=args.proc_root)
+
+    try:
+        from .mcp.server import run_server as run_mcp
+    except ImportError as exc:
+        print(
+            "error: the MCP server needs the SDK: pip install 'syshealth[mcp]'\n"
+            f"       ({exc})",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    from .mcp.sources import LiveSource, ReplaySource, load_run
+
+    source: object
+    if args.replay:
+        try:
+            source = ReplaySource(load_run(args.replay), label=Path(args.replay).name)
+        except (OSError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return EXIT_ERROR
+    else:
+        source = LiveSource(settings.proc_root)
+
+    return run_mcp(source)  # type: ignore[arg-type]
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = load_settings(
         args.config,
@@ -422,6 +455,21 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--node-name")
     agent.add_argument("--instance-type")
     agent.set_defaults(func=cmd_agent)
+
+    mcp = sub.add_parser(
+        "mcp",
+        help="expose the read-only measurement tools to an AI client over MCP",
+    )
+    common(mcp)
+    mcp.add_argument(
+        "--replay",
+        help=(
+            "serve a recorded JSONL run instead of this machine. Lets the tools "
+            "be exercised where there is no PSI kernel, and is the only way to "
+            "demonstrate a saturated machine without saturating one"
+        ),
+    )
+    mcp.set_defaults(func=cmd_mcp)
 
     serve = sub.add_parser("serve", help="run the fleet server and dashboard")
     serve.add_argument("--config")

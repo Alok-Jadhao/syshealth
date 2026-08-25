@@ -120,6 +120,47 @@ syshealth agent --server http://10.0.0.5:5000 --instance-type t3.small
 
 > The server has **no authentication**. Bind it to a private interface, a security group, a VPN or a reverse proxy. It warns you if you bind `0.0.0.0`.
 
+### AI tooling (MCP)
+
+`syshealth mcp` exposes the measurement stack to an AI client as [Model Context
+Protocol](https://modelcontextprotocol.io) tools, so an agent can measure a
+machine rather than be told about it in prose.
+
+```bash
+pip install -e '.[mcp]'
+
+# in Claude Code, Claude Desktop, or any MCP client
+claude mcp add syshealth -- syshealth mcp
+```
+
+| Tool | Returns |
+| ---- | ------- |
+| `get_health` | per-resource state and the bottleneck, over one measured window |
+| `get_memory_pressure` | memory saturation and both utilisation figures, side by side |
+| `get_cpu_pressure` | CPU stall next to CPU busy |
+| `get_reclaim_activity` | direct reclaim, major faults, swap, OOM kills |
+
+Every tool is **read-only** — advertised to the client with MCP's
+`readOnlyHint` — and nothing in this server can change the state of a machine.
+Tools carry a permission tier (`READ_ONLY`, `LOW_RISK`, `HIGH_RISK`) from which
+those hints are derived; only the first is in use today.
+
+Each response names where its data came from and how long it measured for, so a
+replayed recording can never be mistaken for a live machine:
+
+```bash
+syshealth mcp --replay tests/fixtures/runs/thrashing.jsonl
+```
+
+That flag is how the tools are exercised without a PSI kernel, and the only way
+to demonstrate a saturated machine without saturating one. `make mcp-smoke`
+runs a real client against it end to end.
+
+The tool descriptions deliberately tell the model to diagnose from saturation
+and treat utilisation as context. A tool schema is a prompt: handing a model
+`memory: 94%` invites it to diagnose a memory problem on a healthy cache-heavy
+box, which is the false alarm this project exists to refute.
+
 ## Configuration
 
 Nothing deployment-specific is hardcoded. Settings resolve in this order, later winning:
@@ -198,6 +239,10 @@ src/syshealth/
   agent.py      push agent, stdlib only
   server.py     fleet API (needs Flask)
   cli.py        argparse entry point
+  mcp/
+    sources.py  where a tool measures from: live /proc, or a recorded run
+    tools.py    the tools themselves; imports no MCP SDK, so it stays testable
+    server.py   the only module that touches the SDK
 ```
 
 ## Limitations

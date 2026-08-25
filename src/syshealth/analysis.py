@@ -59,6 +59,18 @@ class Thresholds:
     # condemn an otherwise healthy machine.
     headline_percentile: int = 95
 
+    # Utilisation exceeding saturation by more than this many percentage points
+    # is the divergence this project exists to demonstrate, and is worth
+    # pointing out explicitly to whoever — or whatever — is reading.
+    divergence_note_pct: float = 25.0
+
+    # A window with more background reclaim than this, or with any swap-in at
+    # all, is not quiet enough to describe high utilisation as harmless. Well
+    # below direct_reclaim_per_s: this is "is anything happening", not "is the
+    # working set too big". Deliberately conservative, because the cost of
+    # wrongly reassuring someone is higher than the cost of staying silent.
+    quiet_reclaim_per_s: float = 10.0
+
 
 def classify(
     sample: Interval,

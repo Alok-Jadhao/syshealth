@@ -25,7 +25,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: install
-        run: pip install -e '.[dev,server]'
+        run: pip install -e '.[dev,server,mcp]'
 
       - name: lint
         run: ruff check src tests tools
@@ -43,3 +43,6 @@ jobs:
           syshealth --version
           syshealth doctor || true   # no PSI on runners; must not crash
           syshealth report tests/fixtures/runs/cache-heavy.jsonl --json > /dev/null
+
+      - name: mcp server answers a real client
+        run: python tools/mcp_smoke.py

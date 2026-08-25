@@ -14,8 +14,8 @@ $(BIN)/python:
 	$(BIN)/pip install --quiet --upgrade pip
 
 .PHONY: install
-install: $(BIN)/python ## create venv and install with dev+server extras
-	$(BIN)/pip install --quiet -e '.[dev,server]'
+install: $(BIN)/python ## create venv and install with dev+server+mcp extras
+	$(BIN)/pip install --quiet -e '.[dev,server,mcp]'
 	@echo "ready: source $(VENV)/bin/activate"
 
 .PHONY: test
@@ -46,6 +46,10 @@ demo: install ## show all three scenarios without needing a PSI kernel
 		echo "\n=============== $$s ==============="; \
 		$(BIN)/syshealth report tests/fixtures/runs/$$s.jsonl --instance-type t3.large; \
 	done
+
+.PHONY: mcp-smoke
+mcp-smoke: install ## prove an MCP client can discover and call the tools
+	$(PY) tools/mcp_smoke.py
 
 .PHONY: doctor
 doctor: install ## check whether this machine can be measured
