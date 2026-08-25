@@ -36,6 +36,10 @@ CONFIG_SEARCH = (
 class Settings:
     # measurement
     proc_root: str = "/proc"
+    # Measure one cgroup instead of the whole machine. `container` resolves a
+    # Docker container id to its cgroup; `cgroup_root` names the path directly.
+    cgroup_root: str = ""
+    container: str = ""
     interval_s: float = 2.0
     duration_s: float = 60.0
 
@@ -52,6 +56,24 @@ class Settings:
     # catalog
     catalog_path: str = ""
 
+    # autonomous SRE. Every default here is the cautious end: observe only,
+    # nothing permitted unattended, two attempts, one node at a time. Enabling
+    # autonomy should require saying so, in a file someone reviewed.
+    incidents_db: str = "incidents.db"
+    mode: str = "OBSERVE"
+    reasoner: str = "rules"
+    autonomous_actions: str = ""
+    max_attempts: int = 2
+    cooldown_s: float = 300.0
+    max_concurrent_nodes: int = 1
+    incident_timeout_s: float = 1800.0
+    action_timeout_s: float = 120.0
+
+    # What this node is declared to run, so a remediation has a target that
+    # was chosen in advance rather than inferred during an incident.
+    managed_service: str = ""
+    managed_container: str = ""
+
     def __post_init__(self) -> None:
         if not self.node_name:
             self.node_name = socket.gethostname()
@@ -61,6 +83,11 @@ _CASTS = {
     "interval_s": float,
     "duration_s": float,
     "bind_port": int,
+    "max_attempts": int,
+    "cooldown_s": float,
+    "max_concurrent_nodes": int,
+    "incident_timeout_s": float,
+    "action_timeout_s": float,
 }
 
 

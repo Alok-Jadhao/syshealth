@@ -252,3 +252,133 @@ def _wrap(text: str, prefix: str, width: int = 74, style: str | None = None, col
     if style:
         return [paint(line, style, enabled=colour) for line in rendered]
     return rendered
+
+
+# --------------------------------------------------------------- incidents --
+
+_STATUS_STYLE = {
+    "RESOLVED": "green",
+    "ESCALATED": "yellow",
+    "AWAITING_APPROVAL": "yellow",
+    "REMEDIATING": "cyan",
+    "VERIFYING": "cyan",
+}
+
+
+def format_incident(report: dict, colour: bool | None = None) -> str:
+    """The whole story of one incident, for a terminal.
+
+    Deliberately the same content the dashboard shows and the API returns.
+    Three questions have to be answerable from this alone: why the system did
+    what it did, on what evidence, and what happened next.
+    """
+    incident = report["incident"]
+    out: list[str] = []
+
+    status = incident["status"]
+    out.append("")
+    out.append(
+        paint(f"  {incident['id']}  ", "bold", enabled=colour)
+        + paint(status, _STATUS_STYLE.get(status, "grey"), enabled=colour)
+        + paint(f"  {incident['severity']}", "grey", enabled=colour)
+    )
+    out.append(paint(f"  {incident['title']}", "bold", enabled=colour))
+    out.append(
+        paint(
+            f"  node {incident['node']} · {incident['age_s']:.0f}s · "
+            f"mode {incident['mode']} · {incident['attempts']} remediation attempt(s)",
+            "grey",
+            enabled=colour,
+        )
+    )
+
+    for diagnosis in report.get("diagnoses", []):
+        out.append("")
+        out.append(paint("  DIAGNOSIS", "bold", enabled=colour))
+        out.extend(_wrap(diagnosis["cause"], "    "))
+        cited = ", ".join(f"#{c}" for c in diagnosis["cites"])
+        out.append(
+            paint(
+                f"    confidence {diagnosis['confidence']} · by {diagnosis['reasoner']} "
+                f"· citing {cited}",
+                "grey",
+                enabled=colour,
+            )
+        )
+        if diagnosis["observations"]:
+            out.append("")
+            out.append(paint("    observed", "bold", enabled=colour))
+            for item in diagnosis["observations"]:
+                out.extend(_wrap(item, "      - ", style="grey", colour=colour))
+        if diagnosis["hypotheses"]:
+            out.append("")
+            out.append(paint("    inferred", "bold", enabled=colour))
+            for item in diagnosis["hypotheses"]:
+                out.extend(_wrap(item, "      - ", style="grey", colour=colour))
+
+    if report.get("evidence"):
+        out.append("")
+        out.append(paint("  EVIDENCE", "bold", enabled=colour))
+        for item in report["evidence"]:
+            mark = " " if item["ok"] else "!"
+            out.append(
+                paint(
+                    f"    {mark} #{item['id']:<4} {item['tool']}({_args(item['arguments'])})",
+                    "grey",
+                    enabled=colour,
+                )
+            )
+
+    if report.get("actions"):
+        out.append("")
+        out.append(paint("  ACTIONS", "bold", enabled=colour))
+        for item in report["actions"]:
+            style = "green" if item["status"] == "SUCCEEDED" else (
+                "red" if item["status"] in ("FAILED", "DENIED", "REJECTED") else "yellow"
+            )
+            label = f"{item['status']:<18}"
+            out.append(
+                f"    {paint(label, style, enabled=colour)} "
+                f"{item['action']}({_args(item['arguments'])})  "
+                + paint(f"[{item['tier']}]", "grey", enabled=colour)
+            )
+            out.extend(_wrap(f"why: {item['reason']}", "      ", style="grey", colour=colour))
+            out.extend(_wrap(f"policy: {item['ruling']}", "      ", style="grey", colour=colour))
+
+    for check in report.get("verifications", []):
+        out.append("")
+        out.append(
+            paint("  VERIFICATION  ", "bold", enabled=colour)
+            + paint(
+                "RECOVERED" if check["recovered"] else "NOT RECOVERED",
+                "green" if check["recovered"] else "red",
+                enabled=colour,
+            )
+        )
+        for item in check["checks"]:
+            mark = "PASS" if item["passed"] else "FAIL"
+            style = "green" if item["passed"] else "red"
+            out.append(
+                f"    {paint(mark, style, enabled=colour)}  {item['name']}: "
+                + paint(item["observed"], "grey", enabled=colour)
+            )
+
+    out.append("")
+    out.append(paint("  TIMELINE", "bold", enabled=colour))
+    for event in incident["timeline"]:
+        out.append(
+            paint(f"    {event['clock']}  ", "grey", enabled=colour)
+            + paint(f"{event['kind']:<13}", "cyan", enabled=colour)
+            + event["message"]
+        )
+
+    if incident["resolution"]:
+        out.append("")
+        out.extend(_wrap(incident["resolution"], "  -> ", style="bold", colour=colour))
+
+    out.append("")
+    return "\n".join(out)
+
+
+def _args(arguments: dict) -> str:
+    return ", ".join(f"{k}={v!r}" for k, v in sorted(arguments.items()))

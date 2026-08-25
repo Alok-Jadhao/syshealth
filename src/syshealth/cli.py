@@ -23,9 +23,10 @@ from .catalog import Catalog
 from .config import load as load_settings
 from .models import Interval
 from .procfs import ProcReader
-from .render import format_live, format_summary, format_verdict
+from .render import format_incident, format_live, format_summary, format_verdict
 from .rightsize import Policy, Sizing, evaluate
 from .sampler import Sampler
+from .store import Store
 
 EXIT_OK = 0
 EXIT_SATURATED = 2
@@ -314,6 +315,8 @@ def cmd_agent(args: argparse.Namespace) -> int:
         server_url=args.server,
         node_name=args.node_name,
         instance_type=args.instance_type,
+        container=args.container,
+        cgroup_root=args.cgroup,
     )
     if not settings.server_url:
         print(
@@ -397,12 +400,195 @@ def cmd_mcp(args: argparse.Namespace) -> int:
     return run_mcp(tools, notes)
 
 
+def _managed_map(settings, declarations: list[str] | None = None) -> dict[str, dict[str, str]]:
+    """What this deployment has declared each node runs.
+
+    Remediation targets are configuration, not discovery. A node with nothing
+    declared can be investigated and diagnosed but never restarted, because
+    nothing has told the system what it would be restarting.
+
+    Two sources, because there are two deployments. A central loop watching a
+    fleet declares targets per node::
+
+        --managed web-01=service:app --managed cache-01=container:redis
+
+    A loop running on the machine it manages uses the simpler local keys
+    (``managed_service`` / ``managed_container``), which apply to this node.
+    """
+    managed: dict[str, dict[str, str]] = {}
+
+    local = {}
+    if settings.managed_service:
+        local["service"] = settings.managed_service
+    if settings.managed_container:
+        local["container"] = settings.managed_container
+    if local:
+        managed[settings.node_name] = local
+
+    for raw in declarations or []:
+        node, _, target = raw.partition("=")
+        kind, _, name = target.partition(":")
+        if not node or kind not in ("service", "container") or not name:
+            raise ValueError(
+                f"--managed {raw!r} is not valid. Expected "
+                "NODE=service:NAME or NODE=container:NAME"
+            )
+        managed.setdefault(node, {})[kind] = name
+
+    return managed
+
+
+def cmd_sre(args: argparse.Namespace) -> int:
+    """Run the incident loop over the fleet."""
+    from .sre.detect import Detector
+    from .sre.incidents import IncidentStore
+    from .sre.loop import IncidentLoop
+    from .sre.policy import Mode, Policy
+    from .sre.reason import get_reasoner
+
+    settings = load_settings(
+        args.config,
+        db_path=args.db,
+        incidents_db=args.incidents_db,
+        mode=args.mode,
+        reasoner=args.reasoner,
+        autonomous_actions=args.autonomous_actions,
+        interval_s=args.interval,
+    )
+
+    try:
+        policy = Policy.from_settings(settings)
+        reasoner = get_reasoner(settings.reasoner)
+        managed = _managed_map(settings, args.managed)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        telemetry = Store(settings.db_path, read_only=True)
+    except sqlite3.Error as exc:
+        print(
+            f"error: could not open telemetry {settings.db_path}: {exc}\n"
+            "       Is 'syshealth serve' running and collecting?",
+            file=sys.stderr,
+        )
+        return EXIT_ERROR
+
+    from .mcp.fleet import build_fleet_tools
+
+    loop = IncidentLoop(
+        tools=build_fleet_tools(telemetry, Catalog.load(settings.catalog_path or None)),
+        store=IncidentStore(settings.incidents_db),
+        policy=policy,
+        reasoner=reasoner,
+        detector=Detector(),
+        managed=managed,
+    )
+
+    print(f"syshealth sre — mode {policy.mode.value}, reasoner {reasoner.name}")
+    print(f"  telemetry {settings.db_path} (read-only)")
+    print(f"  incidents {settings.incidents_db}")
+    if policy.mode is Mode.AUTONOMOUS:
+        allowed = ", ".join(sorted(policy.autonomous_actions)) or "nothing"
+        print(f"  may run unattended: {allowed}")
+        print("  HIGH_RISK actions still require human approval.")
+    print()
+
+    if args.once:
+        # Detection deliberately requires a symptom to persist across passes,
+        # so a single sweep never fires. Sweep enough times to satisfy that,
+        # then drive every incident it opened as far as it can go.
+        for _ in range(loop.detector.consecutive):
+            loop.detect()
+        results = loop.run_until_settled()
+
+        opened = loop.store.list_incidents(limit=100)
+        if not opened:
+            print("no incidents: nothing in the fleet is above threshold")
+            return EXIT_OK
+        print(json.dumps([r.to_dict() for r in results], indent=2, default=str))
+        print(
+            f"\n{len(opened)} incident(s) recorded in {settings.incidents_db}. "
+            f"See them with:\n  syshealth incidents --incidents-db {settings.incidents_db}",
+            file=sys.stderr,
+        )
+        return EXIT_OK
+
+    try:
+        while True:
+            for result in loop.tick():
+                incident = result.incident_id
+                print(f"[{time.strftime('%H:%M:%S')}] {incident} {result.status.value}: {result.note}")
+            time.sleep(settings.interval_s)
+    except KeyboardInterrupt:
+        print("\nstopped")
+    return EXIT_OK
+
+
+def cmd_executor(args: argparse.Namespace) -> int:
+    """Run the node-side action executor."""
+    settings = load_settings(
+        args.config,
+        server_url=args.server,
+        node_name=args.node_name,
+        interval_s=args.interval,
+    )
+    if not settings.server_url:
+        print("error: no server URL. Pass --server.", file=sys.stderr)
+        return EXIT_ERROR
+
+    from .sre.executor import run_executor
+
+    return run_executor(settings)
+
+
+def cmd_incidents(args: argparse.Namespace) -> int:
+    """Show incidents and their reports from the terminal."""
+    from .sre.incidents import IncidentStore
+
+    settings = load_settings(args.config, incidents_db=args.incidents_db)
+    try:
+        store = IncidentStore(settings.incidents_db, read_only=True)
+    except sqlite3.Error as exc:
+        print(f"error: could not open {settings.incidents_db}: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    if args.incident_id:
+        report = store.report(args.incident_id)
+        if report is None:
+            print(f"error: no such incident: {args.incident_id}", file=sys.stderr)
+            return EXIT_ERROR
+        if args.json:
+            print(json.dumps(report, indent=2, default=str))
+        else:
+            print(format_incident(report))
+        return EXIT_OK
+
+    rows = store.list_incidents(limit=args.limit)
+    if args.json:
+        print(json.dumps([i.to_dict() for i in rows], indent=2, default=str))
+        return EXIT_OK
+
+    if not rows:
+        print("no incidents recorded")
+        return EXIT_OK
+
+    print(f"{'ID':<10} {'STATUS':<18} {'SEV':<9} {'NODE':<14} TITLE")
+    for incident in rows:
+        print(
+            f"{incident.id:<10} {incident.status.value:<18} "
+            f"{incident.severity.value:<9} {incident.node:<14} {incident.title[:60]}"
+        )
+    return EXIT_OK
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     settings = load_settings(
         args.config,
         bind_host=args.host,
         bind_port=args.port,
         db_path=args.db,
+        incidents_db=args.incidents_db,
     )
     try:
         from .server import run_server
@@ -488,6 +674,14 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--interval", type=float)
     agent.add_argument("--node-name")
     agent.add_argument("--instance-type")
+    agent.add_argument(
+        "--container",
+        help=(
+            "measure this Docker container's own cgroup instead of the whole "
+            "machine, so its saturation is attributable to it"
+        ),
+    )
+    agent.add_argument("--cgroup", help="measure this cgroup v2 directory directly")
     agent.set_defaults(func=cmd_agent)
 
     mcp = sub.add_parser(
@@ -523,7 +717,77 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--host", help="bind address (default 127.0.0.1)")
     serve.add_argument("--port", type=int)
     serve.add_argument("--db", help="sqlite path")
+    serve.add_argument("--incidents-db", help="sqlite path for the incident audit trail")
     serve.set_defaults(func=cmd_serve)
+
+    sre = sub.add_parser(
+        "sre",
+        help="run the autonomous incident loop over the fleet",
+        description=(
+            "Detect, investigate, diagnose, and — depending on --mode — remediate "
+            "and verify. Defaults to OBSERVE, which changes nothing."
+        ),
+    )
+    sre.add_argument("--config")
+    sre.add_argument("--db", help="telemetry sqlite path, opened read-only")
+    sre.add_argument("--incidents-db", help="where to record incidents and the audit trail")
+    sre.add_argument(
+        "--mode",
+        choices=["OBSERVE", "ASSIST", "AUTONOMOUS"],
+        help=(
+            "OBSERVE: investigate and recommend only (default). "
+            "ASSIST: propose actions for human approval. "
+            "AUTONOMOUS: run listed low-risk actions unattended; high-risk "
+            "still requires a human"
+        ),
+    )
+    sre.add_argument(
+        "--reasoner",
+        choices=["rules", "claude"],
+        help="rules (default, deterministic, no API key) or claude (needs the ai extra)",
+    )
+    sre.add_argument(
+        "--autonomous-actions",
+        help=(
+            "comma-separated actions permitted without approval in AUTONOMOUS "
+            "mode, e.g. 'restart_service'. Empty means nothing runs unattended"
+        ),
+    )
+    sre.add_argument(
+        "--managed",
+        action="append",
+        metavar="NODE=service:NAME",
+        help=(
+            "declare what a node runs, so a remediation has a target chosen in "
+            "advance rather than guessed during an incident. Repeatable. "
+            "A node with nothing declared is investigated but never restarted"
+        ),
+    )
+    sre.add_argument("--interval", type=float, help="seconds between passes")
+    sre.add_argument("--once", action="store_true", help="one pass, as JSON, then exit")
+    sre.set_defaults(func=cmd_sre)
+
+    executor = sub.add_parser(
+        "executor",
+        help="run the node-side action executor (polls for approved actions)",
+        description=(
+            "Collects approved actions from the server and runs them from a fixed "
+            "allowlist. Opens no port. Run only on nodes that should be remediable."
+        ),
+    )
+    executor.add_argument("--config")
+    executor.add_argument("--server", help="e.g. http://10.0.0.5:5000")
+    executor.add_argument("--node-name")
+    executor.add_argument("--interval", type=float, help="seconds between polls")
+    executor.set_defaults(func=cmd_executor)
+
+    incidents = sub.add_parser("incidents", help="list incidents, or show one in full")
+    incidents.add_argument("incident_id", nargs="?", help="e.g. INC-1001")
+    incidents.add_argument("--config")
+    incidents.add_argument("--incidents-db")
+    incidents.add_argument("--limit", type=int, default=50)
+    incidents.add_argument("--json", action="store_true")
+    incidents.set_defaults(func=cmd_incidents)
 
     return parser
 

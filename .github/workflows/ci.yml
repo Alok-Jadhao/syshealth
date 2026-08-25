@@ -46,3 +46,7 @@ jobs:
 
       - name: mcp server answers a real client
         run: python tools/mcp_smoke.py
+
+      - name: sre loop runs end to end
+        run: |
+          python tools/sre_smoke.py

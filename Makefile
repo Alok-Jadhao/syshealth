@@ -51,6 +51,14 @@ demo: install ## show all three scenarios without needing a PSI kernel
 mcp-smoke: install ## prove an MCP client can discover and call the tools
 	$(PY) tools/mcp_smoke.py
 
+.PHONY: sre-smoke
+sre-smoke: install ## drive the incident loop through every execution mode
+	$(PY) tools/sre_smoke.py
+
+.PHONY: chaos
+chaos: ## bring up the chaos environment (needs docker)
+	./chaos/demo.sh up
+
 .PHONY: doctor
 doctor: install ## check whether this machine can be measured
 	$(BIN)/syshealth doctor

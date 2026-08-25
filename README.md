@@ -183,6 +183,118 @@ and treat utilisation as context. A tool schema is a prompt: handing a model
 `memory: 94%` invites it to diagnose a memory problem on a healthy cache-heavy
 box, which is the false alarm this project exists to refute.
 
+## Autonomous SRE
+
+SysHealth can run the whole incident loop: detect an abnormal condition,
+investigate it with the read-only tools, diagnose it from the evidence,
+choose a remediation, check whether policy permits it, execute it, and then
+**measure the machine again** to find out whether anything actually recovered.
+
+```bash
+syshealth sre --db fleet.db --incidents-db incidents.db --mode OBSERVE
+syshealth incidents                      # what it found
+syshealth incidents INC-1001             # the whole story
+```
+
+### Execution modes
+
+The mode is the master switch, and it defaults to the one that cannot change
+anything.
+
+| Mode | What it may do |
+| ---- | -------------- |
+| `OBSERVE` | investigate and recommend. Nothing changes. **Default.** |
+| `ASSIST` | propose actions and wait for a human to approve each one |
+| `AUTONOMOUS` | run listed low-risk actions unattended. High-risk still requires a human, in every mode |
+
+```bash
+syshealth sre --mode AUTONOMOUS --autonomous-actions restart_service \
+              --managed web-01=service:app
+```
+
+Turning autonomy on and choosing what it may do are two separate decisions:
+with no `--autonomous-actions`, `AUTONOMOUS` behaves like `ASSIST`.
+
+### What it can do, and what it can never do
+
+Every action lives in a catalogue (`sre/actions.py`) with a permission tier and
+a typed argument schema. **There is no shell action, no `run_command`, and no
+argument that reaches a subprocess as free text.** A reasoner cannot invent a
+capability, because execution is a dictionary lookup into that catalogue, not
+string interpretation. `GET /actions/catalogue` publishes the whole list.
+
+Remediation targets are declared in advance with `--managed`, not discovered
+during an incident: a restart aimed at a guessed name is worse than no
+proposal. A node with nothing declared is investigated and diagnosed but never
+restarted.
+
+Nodes **poll** for approved work and open no port. That is deliberate — the
+previous agent shipped an unauthenticated endpoint that ran `stress` on
+request, and this design does not reopen that hole with a password on it.
+
+```bash
+# on a node that should be remediable
+syshealth executor --server http://10.0.0.5:5000
+```
+
+### Evidence, not assertion
+
+A diagnosis records observations and inferences separately, and cites the
+evidence rows it was reached from. **A citation that does not resolve to a
+tool result that was actually collected is rejected**, and the incident goes
+to a human. That is a foreign key, not an instruction, which is what makes
+"the AI must not invent a root cause" enforceable.
+
+The default reasoner (`--reasoner rules`) is deterministic and needs no API
+key. `--reasoner claude` calls the Claude API with the same read-only tools
+attached, for situations the rules do not cover; it is held to exactly the
+same citation contract, and it cannot widen what policy permits.
+
+### Recovery is measured, never assumed
+
+`restart_container` returning exit 0 means a container restarted. It does not
+mean the incident resolved. A successful command moves an incident to
+`VERIFYING`, where the machine is measured again — state improved, stall
+actually fell, no OOM kills or swap-in since, node still reporting. Only that
+closes an incident.
+
+Failure is bounded: every unsuccessful outcome passes through an attempt
+counter the policy engine caps, so remediation escalates to a human rather
+than retrying forever. Cooldowns stop two incidents becoming a restart loop,
+and a blast-radius limit stops a fleet-wide symptom becoming a fleet-wide
+action.
+
+### Auditability
+
+Every incident carries a timeline, the evidence with its values, the
+diagnosis and its citations, every action with the reason and the policy
+ruling behind it, and the verification result. Actions the system wanted to
+take and was refused are recorded too.
+
+```
+syshealth incidents INC-1001     # terminal
+GET /incidents/INC-1001          # JSON
+http://localhost:5000/           # dashboard
+```
+
+### Chaos testing
+
+A Docker environment with a deliberately faulty service, for evaluating the
+loop against something really broken. See [chaos/README.md](chaos/README.md) —
+it has already caught two correctness bugs that the unit tests could not.
+
+```bash
+./chaos/demo.sh up && ./chaos/demo.sh churn && ./chaos/demo.sh sre
+```
+
+### Measuring one container
+
+`/proc/pressure` is host-wide, so per-container saturation needs cgroup v2:
+
+```bash
+syshealth agent --container <id> --server http://10.0.0.5:5000
+```
+
 ## Configuration
 
 Nothing deployment-specific is hardcoded. Settings resolve in this order, later winning:
@@ -261,15 +373,26 @@ src/syshealth/
   agent.py      push agent, stdlib only
   server.py     fleet API (needs Flask)
   cli.py        argparse entry point
+  cgroup.py     per-cgroup PSI, so one container can be measured
+  dashboard.py  the operator UI, one self-contained page
   mcp/
     sources.py  where a tool measures from: live /proc, or a recorded run
     tools.py    tools for this machine; imports no MCP SDK, so it stays testable
     fleet.py    tools over the stored fleet telemetry; also SDK-free
     server.py   the only module that touches the SDK
+  sre/
+    policy.py     the authority: what may happen, and who must say so
+    actions.py    the complete catalogue of what can be done to a machine
+    incidents.py  incidents, timelines, evidence, the audit trail
+    detect.py     turning telemetry into findings
+    reason.py     evidence -> diagnosis; rules by default, Claude optionally
+    verify.py     did it actually work?
+    loop.py       the orchestrator, and the only place the order is decided
+    executor.py   the node side: the only module that executes anything
 ```
 
-`PHASES.md` tracks what is built and what is planned on the way to autonomous
-incident response.
+`PHASES.md` records what each phase built, the bugs found along the way, and
+what is still open.
 
 ## Limitations
 

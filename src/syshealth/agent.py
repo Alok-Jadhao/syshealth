@@ -51,8 +51,32 @@ def push(url: str, payload: dict, timeout: float = 5.0) -> bool:
         return False
 
 
+def _reader(settings: Settings):
+    """Whole machine, or one cgroup.
+
+    ``/proc/pressure`` is host-wide, so an agent inside a container either
+    sees nothing or sees the host and reports it as the container. Measuring a
+    cgroup instead is what makes "which container saturated this box?" a
+    question with an answer.
+    """
+    if settings.container:
+        from .cgroup import for_container
+
+        return for_container(settings.container)
+    if settings.cgroup_root:
+        from .cgroup import CgroupReader
+
+        return CgroupReader(settings.cgroup_root, proc_root=settings.proc_root)
+    return ProcReader(settings.proc_root)
+
+
 def run_agent(settings: Settings) -> int:
-    reader = ProcReader(settings.proc_root)
+    try:
+        reader = _reader(settings)
+    except FileNotFoundError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
     if not reader.has_psi():
         print(f"error: {reader.missing_psi_reason()}", file=sys.stderr)
         return 3

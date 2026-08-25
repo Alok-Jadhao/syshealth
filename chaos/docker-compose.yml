@@ -1,0 +1,32 @@
+# The chaos target: one deliberately imperfect service in a memory-limited
+# container.
+#
+# Only the faulty app runs in Docker. SysHealth itself runs on the host and
+# measures the container's own cgroup — which is simpler than it sounds and
+# more honest than the alternative: /proc/pressure is host-wide, so an agent
+# inside a container would report the host's numbers as the container's.
+# cgroup v2 exposes the same PSI counters per control group, so measuring the
+# app's cgroup attributes saturation to the thing that caused it.
+#
+# The memory limit is what makes the experiment work at all. Without one there
+# is nothing for the app to saturate short of the whole machine, and the
+# incident would be about the host rather than the service.
+#
+# Never point this at real infrastructure. The app exposes unauthenticated
+# endpoints whose entire purpose is to break it.
+
+services:
+  app:
+    build: ./leaky-app
+    container_name: chaos-app
+    ports: ["8080:8080"]
+    mem_limit: 256m
+    memswap_limit: 256m
+    # `no` on purpose: an auto-restarting container would quietly repair the
+    # very failure the loop is supposed to detect and remediate.
+    restart: "no"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 3

@@ -25,3 +25,6 @@ htmlcov/
 syshealth.toml
 runs/
 !tests/fixtures/**
+
+# Chaos environment runtime state
+chaos/.state/

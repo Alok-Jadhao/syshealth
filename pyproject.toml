@@ -32,6 +32,9 @@ server = ["flask>=3.0"]
 # The MCP tool layer. src/syshealth/mcp/tools.py deliberately does not import
 # this, so the tools stay testable wherever the SDK is not installed.
 mcp = ["mcp>=2.0"]
+# The Claude reasoner. Optional on purpose: the default rule-based reasoner is
+# deterministic, needs no API key, and is what CI exercises.
+ai = ["anthropic>=0.40"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
