@@ -1,0 +1,9 @@
+nr_free_pages 52583
+pgscan_kswapd 884412
+pgscan_direct 120455
+pgsteal_kswapd 771230
+pgsteal_direct 98122
+pgmajfault 4471
+pswpin 812
+pswpout 2044
+oom_kill 0

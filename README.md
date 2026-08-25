@@ -1,203 +1,212 @@
-# SysHealth — Real-Time Cloud Instance Health Monitor
+# SysHealth
 
-A lightweight, self-hosted framework for monitoring memory health across AWS EC2 instances in real time. Uses Linux PSI (Pressure Stall Information) kernel metrics, a Flask central server, and a live web dashboard with per-instance health cards and time-series charts.
+**Your monitoring says the server is at 94% memory. It is fine. Your monitoring says the other one is at 60%. It is dying.**
 
----
-
-## Architecture
+SysHealth measures *saturation* — the share of wall-clock time your machine spent unable to make progress — instead of *utilisation*, the share of a resource that is occupied. It then tells you what size the machine should actually be.
 
 ```
-EC2 Agent (t3.micro)  ──┐
-EC2 Agent (t3.small)  ──┤──► Central Server (Flask :5000)  ◄──  Browser Dashboard
-EC2 Agent (t3.medium) ──┤         ▲
-EC2 Agent (t3.large)  ──┘         │ Stress trigger (:5001)
-                                   └──────────────────────
+$ syshealth profile --duration 10m --instance-type t3.micro -- ./run-benchmark.sh
+
+  SATURATION  (share of wall-clock time stalled)
+    memory  p50  14.35%  p95  16.86%  max  16.97%   █████████████··· SATURATED
+    cpu     p50   0.73%  p95   1.31%  max   1.37%   █··············· DEGRADED
+
+  UTILISATION  (what a normal dashboard shows)
+    memory  used/free rule   peak  95.0%   <- what most dashboards show
+            working set      peak  95.0%   of 0.95 GB
+
+── verdict ─────────────────────────────────────
+  UNDERSIZED   (high confidence)
+  Undersized on memory. Stalled 16.86% of wall-clock time at p95
+  (24.8s lost to waiting across the run).
+
+    current      t3.micro         1 GB   2 vCPU   $   7.59/mo
+    recommended  t3.medium        4 GB   2 vCPU   $  30.37/mo
+    extra        $22.78/month  ($273.31/year per instance)
 ```
 
-Each agent:
-- Reads `/proc/pressure/memory` (PSI avg10) and `/proc/vmstat` every 5 seconds
-- Classifies health as **HEALTHY / DEGRADED / CRITICAL** using a calibrated baseline
-- POSTs a JSON payload to the central server
-- Runs a control server on port 5001 that accepts stress test commands from the dashboard
-
 ---
 
-## Dashboard
+## The problem
 
-Open `http://YOUR_SERVER_IP:5000` in your browser.
+Almost every autoscaling rule, capacity alert and right-sizing tool is built on utilisation: CPU percent, memory percent, disk percent. Utilisation is a bad proxy for whether anything is actually wrong.
 
-- Live cards per instance — green dot (online) / grey dot (offline)
-- Health badge: HEALTHY / DEGRADED / CRITICAL
-- PSI, Avg PSI, pgscan/pgsteal deltas, last-seen timestamp
-- Chart.js time-series PSI chart per instance (auto-updates every 3s)
-- **⚡ Stress All** button — fires simultaneous memory stress tests on all online instances
+Memory is the worst offender. Linux fills otherwise-idle RAM with page cache, so a perfectly healthy server routinely reports 90%+ "used". Teams see the number, get alarmed, and provision a bigger box. Meanwhile a machine reporting a comfortable 60% can be in continuous direct reclaim — evicting pages it is about to need again — and the utilisation graph shows nothing unusual at all.
 
----
+The result is the two failure modes that cost real money: **paying for headroom nobody needed**, and **not noticing the box that is quietly thrashing**.
 
-## Experimental Results
+Since Linux 4.20 the kernel has exposed the number that actually answers the question. Pressure Stall Information (`/proc/pressure/*`) reports how long tasks spent blocked waiting for memory, IO or CPU. It is a direct measurement of lost progress rather than a proxy for it. It is also almost entirely unused outside a handful of large infrastructure teams.
 
-Same stress test (`stress --vm 2 --vm-bytes 800M --vm-keep`) run on all four instance types simultaneously:
+## What SysHealth does
 
-| Instance Type | RAM | Peak PSI | State |
-|---|---|---|---|
-| t3.micro | 1 GB | 17.10 | **CRITICAL** |
-| t3.small | 2 GB | 11.05 | **CRITICAL** |
-| t3.medium | 4 GB | 0.00 | **HEALTHY** |
-| t3.large | 8 GB | 0.00 | **HEALTHY** |
+1. **Measures saturation properly.** It reads the PSI `total=` microsecond counter, not the smoothed `avg10` field, so a stall figure is an exact accounting of time lost between two samples rather than a decaying average that cannot be aggregated or compared.
+2. **Shows saturation next to utilisation.** Every report contrasts the two, so the divergence is visible rather than theoretical.
+3. **Turns that into a sizing decision.** A verdict with an instance type, a monthly cost delta, the reasoning, and the evidence behind it.
+4. **Refuses to guess.** No PSI, too few samples, or too short a run, and it says so rather than inventing a confident answer.
 
-**Finding:** t3.medium (4 GB RAM) is the minimum instance type that stays HEALTHY under a 1.6 GB memory workload.
-
----
-
-## Quick Start
-
-### 1. Launch EC2 instances (AWS CLI)
+## Install
 
 ```bash
-# Create key pair
-aws ec2 create-key-pair --region eu-north-1 --key-name syshealth-key \
-  --query "KeyMaterial" --output text > syshealth-key.pem
-chmod 400 syshealth-key.pem
-
-# Create security group (ports 22, 5000, 5001)
-SG_ID=$(aws ec2 create-security-group --region eu-north-1 \
-  --group-name syshealth-sg --description "SysHealth" \
-  --query "GroupId" --output text)
-
-aws ec2 authorize-security-group-ingress --region eu-north-1 \
-  --group-id $SG_ID --ip-permissions \
-  "IpProtocol=tcp,FromPort=22,ToPort=22,IpRanges=[{CidrIp=0.0.0.0/0}]" \
-  "IpProtocol=tcp,FromPort=5000,ToPort=5000,IpRanges=[{CidrIp=0.0.0.0/0}]" \
-  "IpProtocol=tcp,FromPort=5001,ToPort=5001,IpRanges=[{CidrIp=0.0.0.0/0}]"
+git clone https://github.com/Alok-Jadhao/syshealth.git
+cd syshealth
+make install          # venv + dev/server extras
+source .venv/bin/activate
+syshealth doctor      # tells you whether this machine can be measured
 ```
 
-### 2. Set up the central server
+The core has **no runtime dependencies**. `doctor`, `watch`, `profile` and `report` work on a freshly provisioned box with nothing but the system Python 3.10+. Flask is needed only for the optional fleet server.
 
 ```bash
-ssh -i syshealth-key.pem ubuntu@YOUR_SERVER_IP
-
-sudo apt update && sudo apt install -y python3-pip
-pip3 install flask requests
-git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
-nohup python3 server.py > server.log 2>&1 &
+pip install -e .              # core only
+pip install -e '.[server]'    # adds the fleet server
 ```
 
-### 3. Set up agents on each EC2 instance
+### If you have no PSI kernel
+
+macOS, most containers, and older kernels have no `/proc/pressure`. The tool still runs — every analysis path is exercisable against recorded runs:
 
 ```bash
-ssh -i syshealth-key.pem ubuntu@YOUR_AGENT_IP
-
-sudo apt update && sudo apt install -y python3-pip stress
-git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
-
-# Point agent at your server
-sed -i 's|http://127.0.0.1:5000/metrics|http://YOUR_SERVER_IP:5000/metrics|' syshealth.py
-
-# Calibrate baseline (60s idle measurement)
-python3 syshealth.py calibrate
-
-# Start agent
-nohup python3 syshealth.py > agent.log 2>&1 &
+make demo    # all three scenarios, no kernel support needed
 ```
 
-The instance appears on the dashboard within 5 seconds.
-
----
-
-## Deploy Script
-
-After making local changes, push to all instances with one command:
+## Usage
 
 ```bash
-# Deploy agent changes to all EC2 instances
-./deploy.sh agents
-
-# Deploy server + dashboard changes
-./deploy.sh server
-
-# Deploy everything
-./deploy.sh
+syshealth doctor                              # can this machine be measured?
+syshealth watch                               # live saturation, one line per sample
+syshealth profile --duration 15m              # measure a window
+syshealth profile -- ./my-benchmark.sh        # measure a command until it exits
+syshealth profile --duration 30m --save run.jsonl --instance-type t3.small
+syshealth report run.jsonl --instance-type t3.small --json
 ```
 
-Edit the `AGENTS` and `SERVER` variables at the top of `deploy.sh` to match your IPs.
+Profiling a command is the most useful mode: it answers "is this box the right size for *this workload*" with evidence, which is the question you actually have.
 
----
+Exit codes make it usable as a gate in CI or a deploy pipeline:
 
-## Health Classification
-
-| State | Condition | Persistence |
-|---|---|---|
-| HEALTHY | PSI ratio < 2× baseline | Immediate |
-| DEGRADED | PSI ratio 2–5× baseline | 3 consecutive samples (15s) |
-| CRITICAL | PSI ratio ≥ 5× baseline or pgscan delta > 1000 | 3 consecutive samples (15s) |
-
-**Baseline calibration:** Each agent runs a 60-second idle measurement on first launch and saves the average PSI to `baseline.json`. This accounts for per-instance hardware variation. Instances with zero idle PSI fall back to a baseline of 0.01.
-
----
-
-## REST API
-
-| Method | Endpoint | Description |
-|---|---|---|
-| GET | `/` | Live dashboard |
-| POST | `/metrics` | Agent metric push |
-| GET | `/instances` | All instances with online status and latest metrics |
-| GET | `/instances/<hostname>/history` | Last 60 samples for one instance |
-| POST | `/run-stress` | Trigger stress test on all online agents |
+| Code | Meaning |
+| ---- | ------- |
+| 0 | fine, or oversized |
+| 1 | error |
+| 2 | **undersized** — the workload saturated the machine |
+| 3 | PSI unavailable, nothing was measured |
 
 ```bash
-# List all instances
-curl http://YOUR_SERVER_IP:5000/instances
-
-# Trigger stress test on all instances
-curl -X POST http://YOUR_SERVER_IP:5000/run-stress
+syshealth profile --duration 5m -- ./load-test.sh || echo "needs a bigger box"
 ```
 
----
+### Fleet mode
 
-## Customising the Stress Test
+For monitoring many machines, agents push measurements to a central server, which runs the same verdict engine over each node's history.
 
-Edit the stress parameters in `syshealth.py`:
+```bash
+# server
+syshealth serve --host 0.0.0.0 --port 5000 --db fleet.db
 
-```python
-["stress", "--vm", "2", "--vm-bytes", "800M", "--vm-keep", "--timeout", "120s"]
+# on each machine
+syshealth agent --server http://10.0.0.5:5000 --instance-type t3.small
 ```
 
-| Flag | Effect |
-|---|---|
-| `--vm 2` | Number of memory worker processes |
-| `--vm-bytes 800M` | RAM each worker allocates |
-| `--timeout 120s` | Duration of the stress test |
+| Endpoint | Description |
+| -------- | ----------- |
+| `POST /metrics` | agent push |
+| `GET /nodes` | every node with online status |
+| `GET /nodes/<node>/samples` | recent measurements |
+| `GET /nodes/<node>/verdict` | sizing verdict for one node |
+| `GET /fleet` | every verdict plus the fleet-wide monthly cost delta |
+| `GET /healthz` | liveness |
 
-Then run `./deploy.sh agents` to push the change to all instances.
+`GET /fleet` is the one that matters: it totals what the whole fleet is over- and under-provisioned by, in dollars per month.
 
----
+> The server has **no authentication**. Bind it to a private interface, a security group, a VPN or a reverse proxy. It warns you if you bind `0.0.0.0`.
 
-## Project Structure
+## Configuration
+
+Nothing deployment-specific is hardcoded. Settings resolve in this order, later winning:
+
+1. defaults
+2. `syshealth.toml` (`--config`, `SYSHEALTH_CONFIG`, `./syshealth.toml`, `~/.config/syshealth/config.toml`)
+3. `SYSHEALTH_*` environment variables
+4. command line flags
+
+```toml
+[syshealth]
+interval_s    = 2.0
+instance_type = "t3.medium"
+server_url    = "http://10.0.0.5:5000"
+db_path       = "/var/lib/syshealth/fleet.db"
+```
+
+Prices in the built-in catalog are **reference values** for us-east-1 on-demand Linux and are not live. Override them:
+
+```bash
+syshealth report run.jsonl --catalog ./my-prices.json
+```
+
+## How the verdict is reached
+
+Thresholds are percentages of wall-clock time stalled, so they mean the same thing on a Raspberry Pi and a 24-core server. All of them live in one place, `Thresholds` in `analysis.py`.
+
+| State | Condition |
+| ----- | --------- |
+| HEALTHY | `some` stall below 1% |
+| DEGRADED | `some` stall 1–10%, or `full` stall above 0.5% |
+| SATURATED | `some` stall at or above 10%, or `full` stall at or above 2% |
+
+`some` means at least one task was stalled. `full` means *nothing* ran — every runnable task was blocked. Some `some` pressure is normal on a busy server; sustained `full` pressure never is, which is why its thresholds are lower.
+
+The run-level state uses the p95, not the max, so one transient spike does not condemn an otherwise healthy machine.
+
+Sizing then follows from the state:
+
+- **Saturated** → step up one size, or two if there were OOM kills, swap-in, or `full` stall above 5%. Reported as a floor, not a target: a machine that stalled may have a working set larger than anything observable on it.
+- **Healthy** → find the smallest type that still covers the observed peak working set plus 30% headroom. The working set is derived from `MemAvailable`, which already excludes reclaimable page cache — this is what stops the recommendation being fooled by cache the way a `used`-based figure would be.
+- **Not enough evidence** → no recommendation. Runs shorter than 5 minutes never produce downsizing advice, because a quiet 60-second window is not proof that a box can be shrunk.
+
+## Development
+
+```bash
+make test     # 87 tests, no kernel support required
+make cov      # with coverage
+make lint     # ruff
+make fixtures # regenerate recorded runs
+```
+
+CI runs on Ubuntu **and macOS**, on purpose: the suite must pass without a PSI kernel. That is what proves a contributor can develop on any laptop, and it is enforced rather than hoped for.
+
+Recorded scenarios in `tests/fixtures/runs/` are generated by `tools/make_fixtures.py` from a fixed seed, so they are reproducible and reviewable in a diff rather than being opaque blobs:
+
+| Scenario | What it demonstrates |
+| -------- | -------------------- |
+| `thrashing` | genuine memory saturation — must say UNDERSIZED |
+| `cache-heavy` | 94% "used", zero stalling — the false alarm; must **not** say grow |
+| `idle-oversized` | a large box doing little — the money case |
+
+## Layout
 
 ```
-syshealth/
-├── server.py          # Flask central server + REST API
-├── syshealth.py       # Agent: collector, analyzer, control server, push client
-├── analyzer.py        # Sliding-window PSI classifier (HEALTHY/DEGRADED/CRITICAL)
-├── collector.py       # Reads /proc/pressure/memory and /proc/vmstat
-├── reporter.py        # Local stdout logging
-├── deploy.sh          # One-command deploy to all EC2 instances
-└── templates/
-    └── index.html     # Real-time dashboard (HTML + Chart.js)
+src/syshealth/
+  procfs.py     kernel readers; every one takes a root, which is why this is testable
+  models.py     Snapshot and Interval; diff() is the core measurement
+  sampler.py    turns a reader into a stream of Intervals
+  analysis.py   thresholds, classification, run summaries
+  catalog.py    instance types and reference prices
+  rightsize.py  the verdict engine
+  render.py     terminal output
+  config.py     the only module that reads the environment
+  store.py      sqlite persistence for the fleet server
+  agent.py      push agent, stdlib only
+  server.py     fleet API (needs Flask)
+  cli.py        argparse entry point
 ```
 
----
+## Limitations
 
-## Requirements
+- **Linux only, kernel 4.20+ with `CONFIG_PSI=y`.** Some distributions also need `psi=1` on the kernel command line. Containers usually do not expose the host's PSI; run the agent on the host, or bind-mount `/proc` and pass `--proc-root /host/proc`.
+- **A verdict only covers what ran during the measurement.** Profile a representative peak, not a quiet afternoon, before resizing anything in production.
+- **Prices are reference values.** They ignore reserved instances, savings plans, spot, and every region but us-east-1.
+- **Sizing is single-machine.** It answers "how big should this box be", not "should this be three boxes".
 
-- Python 3.10+
-- `pip install flask requests`
-- Linux kernel ≥ 4.20 (PSI support)
-- `stress` package on agent instances (`sudo apt install stress`)
+## Licence
 
----
-
-## Tech Stack
-
-Python · Flask · Chart.js · Linux PSI · vmstat · AWS EC2 · AWS CLI · Bash
+MIT.

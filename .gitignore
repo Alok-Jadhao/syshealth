@@ -1,3 +1,27 @@
-__pycache__
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Runtime artefacts
+*.db
+*.db-wal
+*.db-shm
 *.log
-*.json
+
+# Local config and recorded runs. Note this is deliberately specific:
+# the old .gitignore had a blanket `*.json`, which silently excluded the
+# instance catalog and any committed fixture.
+syshealth.toml
+runs/
+!tests/fixtures/**

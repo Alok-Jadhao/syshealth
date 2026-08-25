@@ -1,0 +1,37 @@
+# Copy to syshealth.toml and edit. That filename is gitignored, so local
+# settings never end up in a commit.
+#
+# Every key here can also be set as SYSHEALTH_<KEY> in the environment,
+# which is usually easier under systemd. Flags beat env, env beats this file.
+
+[syshealth]
+
+# --- measurement ---------------------------------------------------------
+interval_s = 2.0        # seconds between samples
+duration_s = 60.0       # default length of `syshealth profile`
+
+# Point this at a bind-mounted host /proc when running inside a container,
+# since containers usually do not expose the host's PSI.
+# proc_root = "/host/proc"
+
+# --- identity ------------------------------------------------------------
+# What this machine is. Without it, the tool can still report saturation but
+# cannot name a replacement instance type or price a change.
+# instance_type = "t3.medium"
+# node_name     = "web-1"       # defaults to the hostname
+
+# --- fleet ---------------------------------------------------------------
+# Agents need this. Local-only use does not.
+# server_url = "http://10.0.0.5:5000"
+
+# Server side. Keep bind_host on loopback unless it is behind a security
+# group, VPN or reverse proxy — there is no authentication.
+bind_host = "127.0.0.1"
+bind_port = 5000
+db_path   = "syshealth.db"
+
+# --- pricing -------------------------------------------------------------
+# The built-in catalog holds reference us-east-1 on-demand prices and ignores
+# reserved instances, savings plans and spot. Point this at your own rates
+# before quoting any figure to anyone.
+# catalog_path = "./my-prices.json"

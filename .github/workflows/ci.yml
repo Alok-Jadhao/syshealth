@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "pivot/**"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS is in the matrix on purpose. The tool targets Linux, but the
+        # test suite must pass without a PSI kernel — that is what proves the
+        # fixtures work and that a contributor can develop on any laptop.
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.10", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: install
+        run: pip install -e '.[dev,server]'
+
+      - name: lint
+        run: ruff check src tests tools
+
+      - name: test
+        run: pytest --cov=syshealth --cov-report=term-missing
+
+      - name: fixtures are reproducible
+        run: |
+          python tools/make_fixtures.py
+          git diff --exit-code tests/fixtures/runs/
+
+      - name: cli smoke test
+        run: |
+          syshealth --version
+          syshealth doctor || true   # no PSI on runners; must not crash
+          syshealth report tests/fixtures/runs/cache-heavy.jsonl --json > /dev/null
