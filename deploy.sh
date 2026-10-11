@@ -11,7 +11,7 @@ SCP="scp -i $KEY -o StrictHostKeyChecking=no"
 deploy_agents() {
   echo ">> Deploying agent files..."
   for IP in $AGENTS; do
-    $SCP syshealth.py analyzer.py collector.py reporter.py ubuntu@$IP:~/ &
+    $SCP syshealth.py analyzer.py collector.py reporter.py instance.py loadtest.py ubuntu@$IP:~/ &
   done
   wait
 
@@ -29,8 +29,11 @@ ENDSSH
 
 deploy_server() {
   echo ">> Deploying server files..."
-  $SCP server.py ubuntu@$SERVER:~/
+  $SCP server.py instance.py loadtest.py ubuntu@$SERVER:~/
+  $SSH ubuntu@$SERVER 'mkdir -p ~/templates ~/static/js ~/static/css'
   $SCP templates/index.html ubuntu@$SERVER:~/templates/index.html
+  $SCP static/js/dashboard.js ubuntu@$SERVER:~/static/js/dashboard.js
+  $SCP static/css/dashboard.css ubuntu@$SERVER:~/static/css/dashboard.css
 
   echo ">> Restarting server..."
   $SSH ubuntu@$SERVER bash << 'ENDSSH'

@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import signal
 import socket
 import subprocess
 import sys
@@ -8,8 +9,9 @@ import threading
 import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import instance
+import loadtest
 from collector import Collector
-from analyzer import Analyzer
+from analyzer import Analyzer, THRESHOLDS
 from reporter import Reporter
 
 HOSTNAME = socket.gethostname()
@@ -34,20 +36,162 @@ def _make_killable():
         pass
 
 
+class LoadRunner:
+    """Runs one load test at a time: each phase of the plan is one stress run.
+
+    Every phase lasts its full planned time, even if stress dies early. On a
+    t3.micro the OOM killer often ends it part way through; if the next phase
+    started early, this box would drift out of step with the others and the
+    comparison between sizes would fall apart. The early exit is counted
+    instead, and reported, because "the test process was killed" is a result.
+    """
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = None
+        self._proc = None
+        self._status = None
+
+    def busy(self):
+        return self._thread is not None and self._thread.is_alive()
+
+    def start(self, test_id, plan):
+        with self._lock:
+            if self.busy():
+                return False
+            self._stop.clear()
+            self._thread = threading.Thread(
+                target=self._run, args=(test_id, plan), daemon=True)
+            self._thread.start()
+            return True
+
+    def stop(self):
+        was_running = self.busy()
+        self._stop.set()
+        self._kill()
+        return was_running
+
+    def status(self):
+        """What the dashboard shows while a test runs; None when idle."""
+        status = self._status
+        if not status:
+            return None
+        status = dict(status)
+        status["remaining_sec"] = max(0, round(status.pop("ends_at") - time.time()))
+        return status
+
+    def _kill(self):
+        with self._lock:
+            proc = self._proc
+        if proc is None or proc.poll() is not None:
+            return
+        # stress forks its workers; they share its process group.
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            try:
+                os.killpg(proc.pid, sig)
+                proc.wait(timeout=3)
+                return
+            except subprocess.TimeoutExpired:
+                continue
+            except ProcessLookupError:
+                return
+
+    def _run(self, test_id, plan):
+        ends_at = time.time() + plan["total_sec"]
+        killed = 0
+        try:
+            for i, phase in enumerate(plan["phases"]):
+                if self._stop.is_set():
+                    break
+                phase_end = time.time() + phase["seconds"]
+                self._status = {
+                    "test_id": test_id,
+                    "mode": plan["mode"],
+                    "pattern": plan["pattern"],
+                    "summary": plan["summary"],
+                    "step": i + 1,
+                    "steps": len(plan["phases"]),
+                    "load_mb": phase["mb"],
+                    "stress_killed": killed,
+                    "ends_at": ends_at,
+                }
+                if phase["mb"] > 0:
+                    proc = subprocess.Popen(
+                        loadtest.stress_argv(plan["workers"], phase["mb"], phase["seconds"]),
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                        preexec_fn=_make_killable,
+                    )
+                    with self._lock:
+                        self._proc = proc
+                    # A stop that landed between Popen and here found no
+                    # process to kill.
+                    if self._stop.is_set():
+                        self._kill()
+                    try:
+                        code = proc.wait(timeout=phase["seconds"] + 10)
+                    except subprocess.TimeoutExpired:
+                        self._kill()
+                        code = 0
+                    if code != 0 and not self._stop.is_set() and time.time() < phase_end - 1:
+                        killed += 1
+                        self._status["stress_killed"] = killed
+                        print(f"load test {test_id}: stress exited early in step {i + 1} "
+                              f"(code {code}) - likely the OOM killer", flush=True)
+                # Hold the phase for its full time; see the class docstring.
+                self._stop.wait(max(0, phase_end - time.time()))
+        finally:
+            with self._lock:
+                self._proc = None
+            self._status = None
+
+
+runner = LoadRunner()
+
+
 class ControlHandler(BaseHTTPRequestHandler):
+    def _reply(self, code, body):
+        data = json.dumps(body).encode("utf-8")
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _body(self):
+        length = int(self.headers.get("Content-Length") or 0)
+        if not length:
+            return {}
+        body = json.loads(self.rfile.read(min(length, 65536)) or b"{}")
+        if not isinstance(body, dict):
+            raise ValueError("Expected a JSON object.")
+        return body
+
     def do_POST(self):
         if self.path == "/stress":
-            subprocess.Popen(
-                ["stress", "--vm", "2", "--vm-bytes", "800M", "--vm-keep", "--timeout", "60s"],
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                preexec_fn=_make_killable,
-            )
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"stress started")
+            try:
+                body = self._body()
+                # No body is an old server pressing the old button: run the
+                # old fixed test. A body without a plan is a mistake, not that.
+                if not body:
+                    plan = loadtest.build_plan(loadtest.DEFAULT_SPEC)
+                elif "plan" in body:
+                    plan = loadtest.validate_plan(body["plan"])
+                else:
+                    raise ValueError("Expected a plan.")
+            except (ValueError, AttributeError) as exc:
+                self._reply(400, {"status": "rejected", "error": str(exc)})
+                return
+            test_id = str(body.get("test_id") or int(time.time()))[:32]
+            if runner.start(test_id, plan):
+                self._reply(200, {"status": "started", "test_id": test_id})
+            else:
+                self._reply(409, {"status": "busy", "error": "a test is already running"})
+        elif self.path == "/stop":
+            self._reply(200, {"status": "stopped" if runner.stop() else "idle"})
         else:
-            self.send_response(404)
-            self.end_headers()
+            self._reply(404, {"error": "not found"})
 
     def log_message(self, *args):
         pass
@@ -105,6 +249,7 @@ def main():
     analyzer = Analyzer()
     reporter = Reporter()
     identity = instance.detect()
+    mem_total_mb = collector.read_mem_total_mb()
 
     print(f"SysHealth started | control port {CONTROL_PORT}")
     print(f"Instance: {identity['instance_type']} ({HOSTNAME})")
@@ -113,23 +258,27 @@ def main():
     try:
         while True:
             data = collector.get_metrics()
-            state, avg_psi, s_d, t_d, reason = analyzer.update(data['psi'], data['vmstat'])
-            reporter.log_status(state, data['psi'], avg_psi, s_d, t_d, reason)
+            result = analyzer.update(data['psi'], data['psi_full'], data['vmstat'])
+            reporter.log_status(result['state'], data['psi'], result['avg_psi'],
+                                result['pgscan_delta'], result['pgsteal_delta'],
+                                result['reason'], data['psi_full'])
 
             payload = {
                 "hostname": HOSTNAME,
                 "timestamp": time.time(),
-                "state": state,
                 "psi": data['psi'],
-                "avg_psi": avg_psi,
-                "pgscan_delta": s_d,
-                "pgsteal_delta": t_d,
-                "reason": reason,
-                # What the dashboard groups, orders and colours machines by,
-                # and what the threshold lines are drawn from.
+                "psi_full": data['psi_full'],
+                **result,
+                # What the dashboard groups, orders and colours machines by.
                 "instance_type": identity["instance_type"],
                 "instance_id": identity["instance_id"],
-                "baseline": analyzer.baseline
+                "mem_total_mb": mem_total_mb,
+                # The lines the state was decided against, so the dashboard
+                # draws exactly what this agent used.
+                "thresholds": THRESHOLDS,
+                "baseline": analyzer.baseline,
+                # The load this box is under right now, if a test is running.
+                "load_test": runner.status(),
             }
             push_to_server(payload)
             time.sleep(5)

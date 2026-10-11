@@ -65,8 +65,8 @@ output "next_steps" {
     Allow two to three minutes: package install, ${var.calibrate ? "a 60s idle baseline calibration on each agent, " : ""}then the
     first pushes. The Instance toggle appears once two agents are reporting.
 
-    Press "Stress all" to put the fleet under load and watch the smaller sizes
-    separate from the larger ones.
+    Open "Load test", enter the memory your app needs (peak, or a variable
+    ramp), and watch the smaller sizes separate from the larger ones.
 
     If a size never appears:
       ssh ubuntu@<ip> 'sudo tail -50 /var/log/syshealth-bootstrap.log'

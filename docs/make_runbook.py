@@ -148,24 +148,10 @@ A(para("Checks your credentials, that the AMI is pinned and the demo tag exists,
        "then applies and waits until all four sizes report.", SMALL))
 A(expect("a table of four sizes, all <font face='Courier'>online=yes</font>, then a dashboard URL."))
 
-A(para("Recalibrate on quiet boxes", H2))
-A(para("Baselines are measured for 60 seconds at first boot, right after package "
-       "installation — so they can be recorded too high. Every state on the "
-       "dashboard is relative to them, so redo it while nothing is loaded.", BODY))
-E(code("""cd terraform
-./recalibrate.sh
-
-# if your key is somewhere else:
-KEY=~/.ssh/your-key.pem ./recalibrate.sh"""))
-A(para("Runs in parallel, about 80 seconds, then prints the new baselines. They should "
-       "all be the same order of magnitude — one far above the rest means that box was "
-       "still busy, so wait a minute and run it again. Do not stress anything while it "
-       "runs, or the load becomes the baseline.", SMALL))
-
 A(para("Rehearse once, then let it settle", H2))
 E(code("""curl -X POST "$(terraform output -raw dashboard_url)/run-stress"
 sleep 45 && ./check.sh"""))
-A(expect("micro and small CRITICAL, medium and large HEALTHY. "
+A(expect("micro and small DEGRADED or CRITICAL, medium and large HEALTHY. "
          "If not, see section 4 before your teacher arrives."))
 A(para("Then wait about two minutes for pressure to fall back to zero, so the live "
        "run starts from a flat line.", SMALL))
@@ -189,7 +175,9 @@ E(say("This is PSI — pressure stall information, straight from the Linux kerne
       "at 90 percent memory and perfectly happy; this measures the pain, not the level."))
 
 A(para("Step 3 — Load all four at once", H2))
-A(para("Press <b>Stress all</b> on the dashboard. Or from the terminal:", BODY))
+A(para("Open <b>Load test</b>. Leave it on <b>Peak load</b>, 1600 MB for 60 seconds, "
+       "and point at the preview: the peak is 168% of the micro's RAM and 84% of the "
+       "small's. Press <b>Start</b>. Or from the terminal:", BODY))
 E(code('curl -X POST "$(terraform output -raw dashboard_url)/run-stress"'))
 A(para("All four are asked in parallel, within a few milliseconds, so the comparison "
        "is fair. Each runs the same job: two workers, 800 MB each, for 60 seconds.", SMALL))
@@ -208,16 +196,22 @@ E(say("The 1.6 gigabyte job fits comfortably on medium and large — they never 
       "memory. That is what pressure looks like."))
 
 A(para("Step 5 — Show one machine on its own", H2))
-A(para("Click <b>t3.small</b> in the Instance toggle. Two dashed threshold lines appear.", BODY))
-E(say("These thresholds are per machine, calculated from that box's own idle baseline — "
-      "two times for degraded, five times for critical. A micro idles differently from a "
-      "large, so a single fixed number would be wrong for both. That is why the lines only "
-      "show when one machine is selected."))
+A(para("Click <b>t3.small</b> in the Instance toggle. The headline is now one number on "
+       "a Healthy, Degraded, Critical scale.", BODY))
+E(say("That number is the share of the last minute that programs spent waiting for "
+      "memory. Ten percent means one second in every ten was lost. Under ten is healthy, "
+      "ten to forty is degraded, forty or more is critical. Those lines are not ours: "
+      "they come from the systems that act on this signal in production, like Android's "
+      "low-memory killer, systemd-oomd and Meta's oomd. The sources are in the repo."))
 
 A(para("Step 6 — The result", H2))
+A(para("Open <b>Load test</b> again. The results under the form name the smallest size "
+       "that stayed healthy.", BODY))
 E(say("The finding is that t3.medium, at 4 gigabytes, is the smallest instance that stays "
       "healthy under this workload. Anything smaller degrades. That is a sizing decision "
-      "made from measurement instead of guesswork."))
+      "made from measurement instead of guesswork. And the load is whatever your app "
+      "needs: switch to <i>Variable load</i> and it ramps up step by step, then tells you "
+      "the load at which each size started to struggle."))
 
 A(PageBreak())
 
@@ -246,10 +240,13 @@ E(say("Usage tells you a number, not whether it hurts. A box sitting at 95 perce
       "lost to waiting, which is the thing users actually feel."))
 
 A(para("“How do the health states work?”", H2))
-E(say("Each agent measures its own idle baseline for 60 seconds when it starts. After that, "
-      "two times baseline is degraded, five times is critical — and it has to hold for three "
-      "consecutive samples, fifteen seconds, before the state changes. That stops one "
-      "momentary spike from being reported as a failure."))
+E(say("Fixed thresholds on the kernel's stall measurement, the same on every size, because "
+      "the number is already a share of time. Under ten percent is healthy, forty or more, "
+      "or the whole machine frozen ten percent of the time, is critical. They are judged on "
+      "a one-minute average and must hold for fifteen seconds before the state changes, so "
+      "one spike is not reported as a failure. We used to compare against each box's idle "
+      "baseline, but dividing by an idle reading near zero turned a tenth of a percent into "
+      "a critical alarm."))
 
 A(para("“What is it built on?”", H2))
 E(say("Python and Flask. The agent reads /proc/pressure/memory and /proc/vmstat. The chart "
@@ -284,11 +281,12 @@ A(para("An agent that is running but cannot reach the dashboard says so in its o
        "<font face='Courier'>push to http://... failed</font>.", SMALL))
 
 A(para("Everything says HEALTHY even under load", H2))
-A(para("A baseline was recorded while the box was busy, so the floor is too high. States "
-       "are ratios against that floor, so the machine reads calm while it struggles.", BODY))
-E(code("./recalibrate.sh        # prints every baseline when it finishes"))
-A(para("One baseline far above the others is the culprit. Let the fleet sit quiet for a "
-       "minute first, or you will record the load again.", SMALL))
+A(para("The load fits. States are fixed thresholds now, so HEALTHY under load means no "
+       "program waited long enough to matter. Check the <b>Right now</b> tile is moving at "
+       "all, then raise <b>Memory to hold</b> in the Load test form, or run a variable "
+       "ramp to find where each size gives way.", BODY))
+A(para("Flat at 0.00 on every size even while a test runs means stress is not running: "
+       "<font face='Courier'>sudo journalctl -u syshealth -n 30</font> on that box.", SMALL))
 
 A(para("Nothing works and you must present anyway", H2))
 A(para("There is a local simulation that needs no AWS and no network. It serves the real "

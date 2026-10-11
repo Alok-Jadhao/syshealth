@@ -6,9 +6,10 @@
 # and unattended-upgrades timers fire around then too. On a t3.micro there is no
 # headroom to absorb that, so the "idle" floor is recorded far too high.
 #
-# Every state on the dashboard is a ratio against that floor, so an inflated
-# baseline makes the most stressed machine read HEALTHY. Re-running the
-# measurement on a quiet box is the fix.
+# States no longer depend on it - they use fixed thresholds, see
+# docs/thresholds.md - so this is optional: it only corrects the idle reference
+# each agent reports. It mattered when every state was a ratio against that
+# floor, and an inflated baseline made the most stressed machine read HEALTHY.
 #
 # Nothing may be under load while this runs, or the load becomes the baseline.
 set -uo pipefail

@@ -49,10 +49,11 @@ still missing:
 ./check.sh
 ```
 
-Press **Stress all** to load the fleet and watch the smaller sizes separate from
-the larger ones. The four are asked at the same moment, in parallel, because
-staggered starts would pull the curves apart for a reason that has nothing to do
-with instance size.
+Open **Load test**, enter the memory your app needs, and start it. A peak test
+holds one level; a variable test ramps, waves or bursts between two. The four
+are asked at the same moment, in parallel, because staggered starts would pull
+the curves apart for a reason that has nothing to do with instance size. When it
+finishes, the panel names the smallest size that stayed healthy.
 
 ## Costs
 
@@ -98,10 +99,13 @@ service, which is how the dashboard knows a box is a `t3.micro` — hostname alo
 cannot tell you that. Reading your own metadata needs no IAM role and no
 credentials, so no instance profile is created.
 
-**Baselines are per instance.** Each agent calibrates its own idle PSI, because
-a `t3.micro` idles differently from a `t3.large`. The dashboard's 2× and 5×
-threshold lines are drawn from that, which is also why those lines only appear
-when a single instance is selected.
+**Thresholds are absolute, the same on every size.** PSI is already a share of
+wall-clock time, so 10% means the same on a `t3.micro` as on a `t3.large`. States
+are fixed bands, not multiples of an idle baseline: a ratio against a near-zero
+floor turned 0.1% into CRITICAL. The sources are in
+[`docs/thresholds.md`](../docs/thresholds.md). Each agent still calibrates its
+idle reading at boot (`calibrate`), but only as a reference. Nothing depends on
+it, so `recalibrate.sh` is optional now.
 
 ## Known limit: history is in memory
 

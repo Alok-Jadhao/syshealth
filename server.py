@@ -2,11 +2,13 @@ from collections import defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import time
+import uuid
 
 import requests
 from flask import Flask, request, jsonify, render_template
 
 import instance
+import loadtest
 
 app = Flask(__name__)
 
@@ -118,20 +120,43 @@ def series():
     return jsonify({"instances": payload})
 
 
-def _start_stress(agent_ip):
+def _plan_from_request():
+    """The form's fields as a plan. No body means the old fixed test.
+
+    Only an empty body does: one that fails to parse is an error, not a quiet
+    fall-through to 1.6 GB on every instance.
+    """
+    if not request.get_data():
+        return loadtest.build_plan(loadtest.DEFAULT_SPEC)
+    spec = request.get_json(silent=True, force=True)
+    if spec is None:
+        raise loadtest.PlanError("The request body is not valid JSON.")
+    return loadtest.build_plan(spec)
+
+
+@app.route("/load-plan", methods=["POST"])
+def load_plan():
+    """Preview: what a form submission would run, without running it."""
     try:
-        r = requests.post(f"http://{agent_ip}:{AGENT_CONTROL_PORT}/stress", timeout=4)
-        return "started" if r.status_code == 200 else f"err {r.status_code}"
-    except Exception as e:
-        return f"unreachable: {e}"
+        plan = _plan_from_request()
+    except loadtest.PlanError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify({"plan": plan, "commands": loadtest.commands(plan)})
 
 
-@app.route("/run-stress", methods=["POST"])
-def run_stress():
-    now = time.time()
-    results = {}
+def _running_tests(now):
+    """Hosts whose latest sample says a test is still going."""
+    busy = {}
+    for host, inst in instances.items():
+        latest = inst["latest"] or {}
+        test = latest.get("load_test")
+        if test and (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC:
+            busy[host] = test
+    return busy
+
+
+def _online_targets(now, results):
     targets = {}
-
     for host, inst in instances.items():
         if (now - inst["last_seen"]) > ONLINE_WINDOW_SEC:
             results[host] = "offline"
@@ -139,18 +164,69 @@ def run_stress():
             results[host] = "no ip"
         else:
             targets[host] = inst["agent_ip"]
+    return targets
 
+
+def _fan_out(targets, send):
     # In parallel, because the comparison is only meaningful if the sizes take
     # the same load at the same moment. Sent one at a time, a single agent that
     # has gone away burns the full timeout before the next is asked, staggering
     # the runs by seconds and pulling the four curves apart for a reason that
     # has nothing to do with instance size.
-    if targets:
-        with ThreadPoolExecutor(max_workers=len(targets)) as pool:
-            started = {h: pool.submit(_start_stress, ip) for h, ip in targets.items()}
-        results.update({h: f.result() for h, f in started.items()})
+    if not targets:
+        return {}
+    with ThreadPoolExecutor(max_workers=len(targets)) as pool:
+        futures = {h: pool.submit(send, ip) for h, ip in targets.items()}
+    return {h: f.result() for h, f in futures.items()}
 
-    return jsonify(results)
+
+def _agent_post(agent_ip, path, body=None):
+    try:
+        r = requests.post(f"http://{agent_ip}:{AGENT_CONTROL_PORT}{path}", json=body, timeout=4)
+        if r.status_code == 404 and path == "/stop":
+            return "agent too old to stop a test"
+        try:
+            reply = r.json()
+            if r.ok:
+                return reply.get("status") or "ok"
+            return "%s: %s" % (reply.get("status") or f"err {r.status_code}",
+                               reply.get("error") or "no detail")
+        except ValueError:
+            # Agents from before load tests answer in plain text.
+            return "started (fixed test - agent predates load tests)" if r.ok else f"err {r.status_code}"
+    except Exception as e:
+        return f"unreachable: {e}"
+
+
+@app.route("/run-stress", methods=["POST"])
+def run_stress():
+    try:
+        plan = _plan_from_request()
+    except loadtest.PlanError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    now = time.time()
+    busy = _running_tests(now)
+    if busy:
+        return jsonify({
+            "error": "A test is already running on %s. Stop it first." % ", ".join(sorted(busy)),
+        }), 409
+
+    test_id = uuid.uuid4().hex[:8]
+    results = {}
+    targets = _online_targets(now, results)
+    body = {"test_id": test_id, "plan": plan}
+    results.update(_fan_out(targets, lambda ip: _agent_post(ip, "/stress", body)))
+
+    return jsonify({"test_id": test_id, "plan": plan, "results": results})
+
+
+@app.route("/stop-stress", methods=["POST"])
+def stop_stress():
+    results = {}
+    targets = _online_targets(time.time(), results)
+    results.update(_fan_out(targets, lambda ip: _agent_post(ip, "/stop")))
+    return jsonify({"results": results})
 
 
 if __name__ == "__main__":

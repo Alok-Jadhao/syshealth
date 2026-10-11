@@ -71,7 +71,7 @@ for i in found:
 missing = [s for s in want if s not in seen]
 print()
 if not missing:
-    print("All four sizes reporting. Press 'Stress all' on the dashboard.")
+    print("All four sizes reporting. Open 'Load test' on the dashboard.")
     sys.exit(0)
 
 print("Not reporting: " + ", ".join(missing))

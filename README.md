@@ -15,10 +15,10 @@ EC2 Agent (t3.large)  ──┘         │ Stress trigger (:5001)
 ```
 
 Each agent:
-- Reads `/proc/pressure/memory` (PSI avg10) and `/proc/vmstat` every 5 seconds
-- Classifies health as **HEALTHY / DEGRADED / CRITICAL** using a calibrated baseline
+- Reads `/proc/pressure/memory` (PSI `some` and `full`, avg10) and `/proc/vmstat` every 5 seconds
+- Classifies health as **HEALTHY / DEGRADED / CRITICAL** against fixed, research-backed thresholds ([below](#health-classification))
 - POSTs a JSON payload to the central server
-- Runs a control server on port 5001 that accepts stress test commands from the dashboard
+- Runs a control server on port 5001 that runs the load tests the dashboard plans, and stops them
 
 ---
 
@@ -26,16 +26,23 @@ Each agent:
 
 Open `http://YOUR_SERVER_IP:5000` in your browser.
 
-- Live cards per instance — green dot (online) / grey dot (offline)
-- Health badge: HEALTHY / DEGRADED / CRITICAL
-- PSI, Avg PSI, pgscan/pgsteal deltas, last-seen timestamp
-- Memory-pressure graph over time, auto-updating, with the analyser's rolling
-  average and its 2×/5× baseline thresholds drawn in
+- **One number, explained.** The headline is the share of the last minute that
+  programs spent waiting for memory, 0–100%. It sits on a Healthy / Degraded /
+  Critical band scale, with a plain-English line under it ("out of every 10
+  seconds, programs spent about 1.4 waiting for memory") and what to do about it.
+  **What the number means** expands into the three bands.
+- Live cards per instance — green dot (online) / grey dot (offline), RAM, and the
+  same band scale, so sizes compare at a glance
+- Memory-pressure graph over time, auto-updating, with the one-minute average
+  the state is judged on, and the Degraded (10%) and Critical (40%) lines drawn
+  in on every view — they are the same for every size
 - **Instance** toggle — one machine on its own, or every size overlaid to
   compare. Colour encodes instance size on a single light-to-dark ramp, so a
   line's shade tells you how big the box is
 - **Range** toggle — 5m / 15m / 1h / All — and a table view of the same samples
-- **⚡ Stress All** button — fires simultaneous memory stress tests on all online instances
+- **⚡ Load test** — a form for the load your app actually has, run on every
+  online instance at the same moment ([below](#load-tests)). The test's load is
+  drawn as a track above the graph, so pressure lines up with what caused it
 
 ---
 
@@ -43,7 +50,7 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
 
 Same stress test (`stress --vm 2 --vm-bytes 800M --vm-keep`) run on all four instance types simultaneously:
 
-| Instance Type | RAM | Peak PSI | State |
+| Instance Type | RAM | Peak PSI | State (old 2×/5× rule) |
 |---|---|---|---|
 | t3.micro | 1 GB | 17.10 | **CRITICAL** |
 | t3.small | 2 GB | 11.05 | **CRITICAL** |
@@ -51,6 +58,12 @@ Same stress test (`stress --vm 2 --vm-bytes 800M --vm-keep`) run on all four ins
 | t3.large | 8 GB | 0.00 | **HEALTHY** |
 
 **Finding:** t3.medium (4 GB RAM) is the minimum instance type that stays HEALTHY under a 1.6 GB memory workload.
+
+> These states were assigned under the old baseline-ratio rule, which the
+> thresholds below replace, and `full` pressure was not recorded then. By peak
+> `some` alone, micro and small fall in the new Degraded band (10–40%). The
+> micro also had its job killed by the OOM killer, which the load-test results
+> now report directly. Re-run with a load test before quoting these.
 
 ---
 
@@ -76,13 +89,14 @@ source .venv/bin/activate      # then: npm run dev
 ```
 
 Then open <http://127.0.0.1:5000>. You get `t3.micro` through `t3.large` under a
-repeating load cycle, the **Instance** toggle to compare them, and a **Stress
-all** button that starts a simulated load episode.
+repeating load cycle, the **Instance** toggle to compare them, and **Load test**,
+which runs a simulated peak or variable test of whatever size you enter.
 
 The pressure values are synthetic and every page says so in a banner. Only the
-sensor is faked: each simulated machine is driven through the real `Analyzer`,
-so the states, the reasons and the 2×/5× threshold lines come out of the same
-code that runs in production.
+sensor is faked: each simulated machine turns memory demand into pressure from
+its own RAM, then goes through the real `Analyzer`, and tests are planned by the
+real `loadtest.py`. So the states, the reasons, the threshold lines and the
+load-test results come out of the same code that runs in production.
 
 `npm` is used only as a familiar entry point — the project is Python, and
 `package.json` has no dependencies to install.
@@ -192,13 +206,30 @@ Edit the `AGENTS` and `SERVER` variables at the top of `deploy.sh` to match your
 
 ## Health Classification
 
-| State | Condition | Persistence |
-|---|---|---|
-| HEALTHY | PSI ratio < 2× baseline | Immediate |
-| DEGRADED | PSI ratio 2–5× baseline | 3 consecutive samples (15s) |
-| CRITICAL | PSI ratio ≥ 5× baseline or pgscan delta > 1000 | 3 consecutive samples (15s) |
+The number is Linux PSI: the share of time programs were stalled waiting for
+memory. 20% means that out of every 10 seconds, 2 were lost waiting, so the work
+could have run about 20% faster with enough memory. It measures harm, not usage:
+a box can be 90% full and fine.
 
-**Baseline calibration:** Each agent runs a 60-second idle measurement on first launch and saves the average PSI to `baseline.json`. This accounts for per-instance hardware variation. Instances with zero idle PSI fall back to a baseline of 0.01.
+| State | Condition (one-minute average) | In plain words | Persistence |
+|---|---|---|---|
+| HEALTHY | `some` < 10% | Under 1 s in every 10 lost to waiting | Immediate |
+| DEGRADED | `some` 10–40% | Noticeably slower than with enough memory | 3 consecutive samples (15s) |
+| CRITICAL | `some` ≥ 40%, or `full` ≥ 10% | Thrashing; timeouts and OOM kills are next | 3 consecutive samples (15s) |
+
+`some` is the share of time *any* task waited; `full` is the share of time
+*every* task did, so nothing got done at all.
+
+The thresholds are absolute: PSI is already normalised to wall-clock time, so
+they mean the same on every size. They are taken from systems that act on PSI in
+production — Android's lmkd, systemd-oomd, Meta's oomd and the TMO paper (ASPLOS
+'22). **[`docs/thresholds.md`](docs/thresholds.md)** has the sources, the
+reasoning for each line, and why the old 2×/5×-of-baseline rule was dropped.
+The values are constants at the top of `analyzer.py`, and every sample carries
+the ones it was judged by, so the dashboard draws whatever was applied.
+
+**Baseline calibration** still runs (`python3 syshealth.py calibrate`) and is
+reported as each machine's idle reference, but states no longer depend on it.
 
 ---
 
@@ -210,33 +241,57 @@ Edit the `AGENTS` and `SERVER` variables at the top of `deploy.sh` to match your
 | POST | `/metrics` | Agent metric push |
 | GET | `/instances` | All instances with online status and latest metrics |
 | GET | `/instances/<hostname>/history` | Last 60 samples for one instance |
-| POST | `/run-stress` | Trigger stress test on all online agents |
+| GET | `/series` | Every instance's recent history — what the graph reads |
+| POST | `/load-plan` | Preview a load test: the plan and the commands, without running it |
+| POST | `/run-stress` | Run a load test on all online agents (no body: the old default test) |
+| POST | `/stop-stress` | Stop the running load test on all online agents |
 
 ```bash
 # List all instances
 curl http://YOUR_SERVER_IP:5000/instances
 
-# Trigger stress test on all instances
+# The old fixed test: 1.6 GB (2 workers x 800 MB) for 60 s
 curl -X POST http://YOUR_SERVER_IP:5000/run-stress
+
+# A variable test: ramp 200 MB -> 1.6 GB in 5 steps of a minute
+curl -X POST http://YOUR_SERVER_IP:5000/run-stress -H 'Content-Type: application/json' \
+  -d '{"mode":"variable","pattern":"ramp","low_mb":200,"high_mb":1600,"steps":5,"step_sec":60,"workers":2}'
+
+curl -X POST http://YOUR_SERVER_IP:5000/stop-stress
 ```
 
 ---
 
-## Customising the Stress Test
+## Load tests
 
-Edit the stress parameters in `syshealth.py`:
+The load is no longer fixed. Open **⚡ Load test** on the dashboard and describe
+your app's memory use. Every online instance runs the same plan at the same
+moment.
 
-```python
-["stress", "--vm", "2", "--vm-bytes", "800M", "--vm-keep", "--timeout", "120s"]
-```
+| Test | Fields | Answers |
+|---|---|---|
+| **Peak load** | Memory to hold (MB), how long | Can each size take my app at its busiest? |
+| **Variable load: ramp up** | From / to (MB), steps, seconds per step | At what load does each size start to struggle? |
+| **Variable load: up and down** | Same | A day of traffic: does each size recover when load drops? |
+| **Variable load: bursts** | Base / spike (MB), how many, seconds each | How does each size take short spikes? |
 
-| Flag | Effect |
-|---|---|
-| `--vm 2` | Number of memory worker processes |
-| `--vm-bytes 800M` | RAM each worker allocates |
-| `--timeout 120s` | Duration of the stress test |
+Before anything runs, the panel previews the plan as a chart, with each
+instance's RAM drawn on it. It shows the peak as a share of that RAM ("168% of
+t3.micro's memory") and the exact `stress` command each step becomes. While it
+runs, a chip in the top bar shows the step and time left, and **Stop test** ends
+it everywhere. Afterwards the panel reports, per instance: the outcome, the worst
+minute, and — for variable tests — the load it was fine up to and where it turned
+Degraded and Critical. It then names the **smallest instance that stayed
+healthy**.
 
-Then run `./deploy.sh agents` to push the change to all instances.
+Each step is one run of `stress --vm <workers> --vm-bytes <MB per worker>M
+--vm-keep --timeout <s>s`. A step always lasts its planned time, even if the OOM
+killer ends `stress` early, so every size stays in step. The early exit is
+counted and reported as "ran out of memory".
+
+The plan is built and bounded in one place, `loadtest.py`: up to 16 GB, 16
+workers, steps of 10–1800 s, an hour in all. The agent re-checks every plan
+before running it, because its control port is on the network.
 
 ---
 
@@ -246,8 +301,9 @@ Then run `./deploy.sh agents` to push the change to all instances.
 syshealth/
 ├── server.py          # Flask central server + REST API
 ├── syshealth.py       # Agent: collector, analyzer, control server, push client
-├── analyzer.py        # Sliding-window PSI classifier (HEALTHY/DEGRADED/CRITICAL)
-├── collector.py       # Reads /proc/pressure/memory and /proc/vmstat
+├── analyzer.py        # Sliding-window PSI classifier, thresholds at the top
+├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, MemTotal
+├── loadtest.py        # Load-test plans: built from the form, checked by the agent
 ├── instance.py        # Instance type/id via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
@@ -256,7 +312,9 @@ syshealth/
 │   └── index.html     # Dashboard markup
 ├── static/
 │   ├── css/dashboard.css
-│   └── js/dashboard.js   # Pressure graph, drawn as inline SVG — no libraries
+│   └── js/dashboard.js   # Pressure graph and load-test panel, inline SVG — no libraries
+├── docs/
+│   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply
     └── check.sh       # Which sizes are reporting, and why one is not
 ```

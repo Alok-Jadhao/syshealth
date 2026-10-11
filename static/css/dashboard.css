@@ -31,6 +31,11 @@
      not another step, so it never reads as a size. */
   --size-other: #eb6834;
 
+  /* Test load is a different quantity from pressure, so it stays neutral:
+     never a size blue, never a status colour. Ink is for text on its fill. */
+  --load-track: #52514e;
+  --load-track-ink: #ffffff;
+
   /* Status scale: reserved meaning, never reused for a series. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
@@ -64,6 +69,9 @@
     --size-medium: #2a78d6;
     --size-large: #184f95;
     --size-other: #d95926;
+
+    --load-track: #c3c2b7;
+    --load-track-ink: #0b0b0b;
   }
 }
 
@@ -88,6 +96,9 @@
   --size-medium: #2a78d6;
   --size-large: #184f95;
   --size-other: #d95926;
+
+  --load-track: #c3c2b7;
+  --load-track-ink: #0b0b0b;
 }
 
 * {
@@ -238,16 +249,51 @@ body {
   outline-offset: 2px;
 }
 
-.stress-result {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  max-width: 1120px;
-  margin: 12px auto -8px;
-  padding: 10px 24px;
-  color: var(--text-secondary);
+.stress-btn[aria-expanded="true"] {
+  background: var(--surface-1);
+  border-color: var(--text-muted);
+}
+
+/* While a test runs, say so everywhere - it changes what every number means. */
+.test-chip {
+  border: 1px solid var(--status-warning);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
   font-size: 12px;
   font-variant-numeric: tabular-nums;
+  padding: 5px 12px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.test-chip:hover {
+  background: var(--hover-wash);
+}
+
+.test-chip:focus-visible,
+.stress-btn:focus-visible,
+.primary-btn:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+.primary-btn {
+  border: 1px solid transparent;
+  background: var(--text-primary);
+  color: var(--plane);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.primary-btn:disabled,
+.ghost-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 /* Whether an agent is still reporting. The shape changes with the state, so
@@ -369,10 +415,173 @@ main {
   background: var(--text-muted);
 }
 
-.hero-reason {
+.hero-pct {
+  margin-left: 2px;
+  font-size: 0.5em;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.hero-meaning {
   margin: 12px 0 0;
+  font-size: 13px;
+}
+
+.hero-action {
+  margin: 6px 0 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.hero-action:empty,
+.hero-reason:empty {
+  display: none;
+}
+
+.hero-reason {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* ---------- band scale ---------- */
+
+/* Where the number sits among the three bands. Each band is a third of the
+   width; the labelled edges say where the stretch is. */
+.band-scale {
+  margin: 0 0 14px;
+}
+
+.band-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 2px;
+  height: 8px;
+}
+
+.band-zone {
+  border-radius: 2px;
+}
+
+.band-zone[data-state="healthy"] {
+  background: var(--status-good);
+  opacity: 0.35;
+}
+
+.band-zone[data-state="degraded"] {
+  background: var(--status-warning);
+  opacity: 0.45;
+}
+
+.band-zone[data-state="critical"] {
+  background: var(--status-critical);
+  opacity: 0.4;
+}
+
+/* Ink, not a status colour, so it reads on every band. */
+.band-marker {
+  position: absolute;
+  top: -4px;
+  width: 4px;
+  height: 16px;
+  margin-left: -2px;
+  border-radius: 2px;
+  background: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--surface-1);
+}
+
+.band-labels {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.3;
+  color: var(--text-muted);
+}
+
+.band-label strong {
+  display: block;
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.band-scale-compact {
+  margin: 10px 0 0;
+}
+
+/* ---------- scale guide ---------- */
+
+.scale-guide {
+  margin: 14px 0 0;
   color: var(--text-secondary);
   font-size: 13px;
+}
+
+.scale-guide summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.scale-guide summary:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+.scale-guide-body {
+  margin-top: 10px;
+  padding: 16px;
+  background: var(--surface-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.scale-guide-body p {
+  margin: 0;
+  max-width: 72ch;
+}
+
+.scale-guide-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px 20px;
+  margin: 14px 0;
+  padding: 0;
+  list-style: none;
+}
+
+.scale-guide-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.scale-guide-range {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.scale-guide-text {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+
+.scale-guide-foot {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.scale-guide code {
+  font-family: var(--mono);
+  font-size: 11px;
 }
 
 .tiles {
@@ -450,6 +659,22 @@ main {
   font-weight: 600;
   line-height: 1.1;
   letter-spacing: -0.01em;
+}
+
+.cmp-pct {
+  margin-left: 1px;
+  font-size: 0.55em;
+  color: var(--text-secondary);
+}
+
+.cmp-unit {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.cmp-test {
+  color: var(--text-secondary);
 }
 
 .cmp-state {
@@ -715,6 +940,212 @@ main {
   margin: 4px 0 0;
   color: var(--text-secondary);
   font-size: 11px;
+  max-width: 260px;
+}
+
+.tt-extra {
+  margin: 6px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- load test ---------- */
+
+.loadtest {
+  margin: 0 0 28px;
+}
+
+.lt-form {
+  display: grid;
+  gap: 14px;
+}
+
+.lt-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.lt-help {
+  margin: -6px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.lt-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 14px 16px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field-note {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.input-unit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.input-unit input {
+  width: 100%;
+  min-width: 0;
+  max-width: 140px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--plane);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.input-unit input:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 1px;
+}
+
+.lt-preview {
+  display: grid;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--plane);
+}
+
+.lt-summary {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.lt-chart {
+  display: block;
+  width: 100%;
+}
+
+.lt-fit {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lt-fit-item {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.lt-fit-item[data-fit="over"] span:last-child {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.lt-commands summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.lt-commands pre {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border-radius: 8px;
+  background: var(--hover-wash);
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.lt-error {
+  margin: 0;
+  color: var(--status-critical);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lt-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 12px;
+}
+
+.lt-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lt-status:empty {
+  display: none;
+}
+
+.lt-results {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border);
+}
+
+.lt-results-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lt-verdict {
+  margin: 8px 0 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.lt-verdict:empty {
+  display: none;
+}
+
+.lt-note {
+  margin: 10px 0 0;
+  max-width: 80ch;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 /* ---------- table view ---------- */

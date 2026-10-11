@@ -89,7 +89,7 @@ variable "swap_mb" {
 }
 
 variable "calibrate" {
-  description = "Run the 60s idle baseline calibration at first boot. Without it every agent falls back to a 0.01 baseline, and the dashboard's 2x/5x threshold lines are guesses."
+  description = "Run the 60s idle baseline calibration at first boot. The baseline is reported as each machine's idle reference; health states use fixed thresholds (docs/thresholds.md) and do not depend on it."
   type        = bool
   default     = true
 }
