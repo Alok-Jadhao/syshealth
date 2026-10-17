@@ -71,6 +71,8 @@
     reportError: null,
     // The test the "your app needs" box was typed against.
     needFor: null,
+    // received_ts of the newest sample held, for ?since= on the next poll.
+    sinceTs: null,
     // The agents report a test only in their next sample, up to a poll and a
     // push later. These bridge that gap, so the page does not offer Start
     // again just after it was pressed, or show a test it was just told to stop.
@@ -1910,7 +1912,12 @@
     var scoped = $('#scoped');
     scoped.classList.add('is-loading');
 
-    return fetch('series?limit=' + HISTORY_LIMIT, { headers: { Accept: 'application/json' } })
+    // The whole hour once, then only what arrived since the newest sample
+    // already held: an hour of four instances is megabytes, every 5 s.
+    var since = state.sinceTs;
+    return fetch('series?limit=' + HISTORY_LIMIT + (since !== null ? '&since=' + since : ''), {
+      headers: { Accept: 'application/json' }
+    })
       .then(function (response) {
         if (!response.ok) {
           throw new Error('HTTP ' + response.status);
@@ -1935,7 +1942,31 @@
         var rows = result.payload && Array.isArray(result.payload.instances)
           ? result.payload.instances
           : [];
+        // Only an answer to the ?since= that was asked is a delta. A server
+        // too old to know the parameter sends everything, and that replaces.
+        var delta = since !== null && result.payload.since === since;
+        var held = {};
+        state.instances.forEach(function (inst) {
+          held[inst.id] = inst.samples;
+        });
+        var newest = since;
         state.instances = rows.map(function (row) {
+          var raw = Array.isArray(row.samples) ? row.samples : [];
+          raw.forEach(function (sample) {
+            var ts = num(sample.received_ts);
+            if (ts !== null && (newest === null || ts > newest)) {
+              newest = ts;
+            }
+          });
+          var fresh = raw.map(normalize).filter(Boolean).sort(function (a, b) {
+            return a.t - b.t;
+          });
+          var samples = delta && held[String(row.hostname)]
+            ? held[String(row.hostname)].concat(fresh)
+            : fresh;
+          if (samples.length > HISTORY_LIMIT) {
+            samples = samples.slice(samples.length - HISTORY_LIMIT);
+          }
           return {
             // Hostname is the server's key, so it is the stable identity here.
             id: String(row.hostname),
@@ -1944,14 +1975,10 @@
             online: row.online !== false,
             secondsSince: num(row.seconds_since),
             color: instanceColor(row.instance_type),
-            samples: (Array.isArray(row.samples) ? row.samples : [])
-              .map(normalize)
-              .filter(Boolean)
-              .sort(function (a, b) {
-                return a.t - b.t;
-              })
+            samples: samples
           };
         });
+        state.sinceTs = newest;
         labelInstances(state.instances);
         renderAll();
       });

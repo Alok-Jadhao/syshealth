@@ -63,5 +63,26 @@ class PrometheusTest(unittest.TestCase):
         self.assertIn(r'hostname="odd\"host\\name\nx"', text)
 
 
+class SeriesTest(unittest.TestCase):
+
+    def test_since_returns_only_newer_samples(self):
+        run_test(RAMP)
+        client = server.app.test_client()
+        full = client.get("/series").get_json()
+        self.assertIsNone(full["since"])
+        newest = max(s["received_ts"] for i in full["instances"] for s in i["samples"])
+        cut = newest - 12  # the last two or three samples of each
+        delta = client.get("/series?since=%r" % cut).get_json()
+        self.assertEqual(delta["since"], cut)
+        self.assertEqual(len(delta["instances"]), 4)
+        for inst in delta["instances"]:
+            self.assertTrue(1 <= len(inst["samples"]) <= 3)
+            self.assertTrue(all(s["received_ts"] > cut for s in inst["samples"]))
+            # Only the newest sample carries the diagnosis.
+            self.assertIn("diagnosis", inst["samples"][-1])
+            self.assertTrue(all("diagnosis" not in s for s in inst["samples"][:-1]))
+        self.assertEqual(client.get("/series?since=nonsense").get_json()["since"], None)
+
+
 if __name__ == "__main__":
     unittest.main()

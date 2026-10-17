@@ -126,11 +126,19 @@ def series():
     except ValueError:
         limit = HISTORY_LIMIT
     limit = max(1, min(limit, HISTORY_LIMIT))
+    # ?since= (a received_ts) asks only for what arrived after it: the page
+    # fetches the hour once, then only the new samples every 5 s.
+    try:
+        since = float(request.args["since"]) if request.args.get("since") else None
+    except ValueError:
+        since = None
 
     now = time.time()
     payload = []
-    for host, inst in instances.items():
+    for host, inst in list(instances.items()):
         samples = list(inst["history"])[-limit:]
+        if since is not None:
+            samples = [s for s in samples if (s.get("received_ts") or 0) > since]
         payload.append({
             "hostname": host,
             "instance_type": inst["instance_type"],
@@ -142,7 +150,7 @@ def series():
             "samples": [_without(s, "diagnosis") for s in samples[:-1]] + samples[-1:],
         })
     payload.sort(key=by_size)
-    return jsonify({"instances": payload})
+    return jsonify({"instances": payload, "since": since})
 
 
 def _without(sample, key):
