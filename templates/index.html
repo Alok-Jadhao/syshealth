@@ -80,18 +80,23 @@
             </div>
           </div>
           <label class="field">
+            <span class="field-label">Your app at its busiest</span>
+            <span class="input-unit"><input type="number" name="need_mb" value="1600" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
+            <span class="field-note">Each size is judged against this</span>
+          </label>
+          <label class="field">
             <span class="field-label">From</span>
             <span class="input-unit"><input type="number" name="low_mb" value="200" min="0" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">Quiet-time memory, 0 for none</span>
           </label>
           <label class="field">
             <span class="field-label">To</span>
-            <span class="input-unit"><input type="number" name="high_mb" value="1600" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
-            <span class="field-note">Busiest-time memory</span>
+            <span class="input-unit"><input type="number" name="high_mb" value="3200" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
+            <span class="field-note">Go past your app's busiest to see the room left</span>
           </label>
           <label class="field">
             <span class="field-label" id="lt-steps-label">Steps</span>
-            <span class="input-unit"><input type="number" name="steps" value="5" min="2" max="20" step="1" inputmode="numeric"></span>
+            <span class="input-unit"><input type="number" name="steps" value="6" min="2" max="20" step="1" inputmode="numeric"></span>
             <span class="field-note" id="lt-steps-note">2 to 20</span>
           </label>
           <label class="field">
@@ -133,7 +138,40 @@
       <div class="lt-results" id="lt-results" hidden>
         <h3 class="lt-results-title" id="lt-results-title">Last test</h3>
         <p class="card-subtitle" id="lt-results-summary"></p>
-        <p class="lt-verdict" id="lt-verdict"></p>
+
+        <!-- The question the test was run to answer. Worked out on the server
+             (rightsize.py), so GET /report gives the same answer. -->
+        <section class="rs" id="rs" aria-labelledby="rs-heading">
+          <div class="rs-head">
+            <h4 class="rs-title" id="rs-heading">Which size to choose</h4>
+            <div class="rs-inputs">
+              <label class="field">
+                <span class="field-label">Your app at its busiest</span>
+                <span class="input-unit"><input type="number" id="rs-need" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
+              </label>
+              <label class="field">
+                <span class="field-label">Keep spare</span>
+                <span class="input-unit"><input type="number" id="rs-margin" value="25" min="0" max="200" step="1" inputmode="numeric"><span>%</span></span>
+              </label>
+            </div>
+          </div>
+          <p class="rs-headline" id="rs-headline" aria-live="polite"></p>
+          <p class="rs-detail" id="rs-detail"></p>
+          <ul class="rs-lines" id="rs-lines"></ul>
+        </section>
+
+        <figure class="rs-curve" id="rs-curve-wrap" hidden>
+          <figcaption class="rs-curve-head">
+            <span class="rs-curve-title">Pressure at each load level</span>
+            <span class="rs-curve-sub">Where each line crosses the degraded line is the most that size can hold.</span>
+          </figcaption>
+          <ul class="legend rs-legend" id="rs-legend"></ul>
+          <div class="rs-plot" id="rs-plot">
+            <svg id="rs-chart" class="rs-chart" xmlns="http://www.w3.org/2000/svg" role="img"
+                 aria-label="Memory pressure against the memory held, for each instance"></svg>
+          </div>
+        </figure>
+
         <div class="table-scroll">
           <table class="data-table">
             <caption class="visually-hidden">How each instance coped with the last load test</caption>
@@ -141,10 +179,11 @@
               <tr>
                 <th scope="col">Instance</th>
                 <th scope="col">Outcome</th>
+                <th scope="col" class="num">Holds up to</th>
+                <th scope="col" class="num">Spare</th>
+                <th scope="col" class="num">Per month</th>
                 <th scope="col" class="num">Worst minute</th>
                 <th scope="col" class="num">Worst 10 s</th>
-                <th scope="col" class="num" data-variable>Fine up to</th>
-                <th scope="col" class="num" data-variable>Degraded from</th>
                 <th scope="col" class="num" data-variable>Critical from</th>
               </tr>
             </thead>
@@ -152,11 +191,15 @@
           </table>
         </div>
         <p class="lt-note">
+          <strong>Holds up to</strong> is the most memory the size held while
+          staying healthy, under the degraded line. Between two load levels it
+          is estimated from the pressure at each, and the estimate errs low.
+          <strong>Spare</strong> is how far that is above what your app needs.
           <strong>Worst minute</strong> is the highest one-minute average, the
-          number states are judged on. <strong>Worst 10&nbsp;s</strong> is the
-          sharpest single spike. The load columns use the average pressure while
-          each level was held, skipping its first 10&nbsp;s while the reading
-          settles.
+          number states are judged on; <strong>Worst 10&nbsp;s</strong> the
+          sharpest spike. Load levels use the average pressure while each was
+          held, skipping its first 10&nbsp;s while the reading settles.
+          <span id="rs-price-note"></span>
         </p>
       </div>
     </section>

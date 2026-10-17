@@ -74,16 +74,20 @@ def detect(refresh=False):
     instance_id = os.environ.get("SYSHEALTH_INSTANCE_ID")
     instance_type = os.environ.get("SYSHEALTH_INSTANCE_TYPE")
     name = os.environ.get("SYSHEALTH_INSTANCE_NAME")
+    # Prices differ by region, so the right-sizing report needs it.
+    region = os.environ.get("SYSHEALTH_INSTANCE_REGION")
 
-    if not instance_id or not instance_type:
+    if not instance_id or not instance_type or not region:
         token = _imds_token()
         if token:
             instance_id = instance_id or _imds("/meta-data/instance-id", token)
             instance_type = instance_type or _imds("/meta-data/instance-type", token)
+            region = region or _imds("/meta-data/placement/region", token)
 
     _cached = {
         "instance_id": instance_id or hostname,
         "instance_type": instance_type or "unknown",
         "instance_name": name or hostname,
+        "region": region,
     }
     return _cached

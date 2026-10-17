@@ -65,6 +65,9 @@ PROFILES = [
 # What Ubuntu, the agent and the page cache it cannot give back hold on to.
 OS_OVERHEAD_MB = 350
 
+# Where the simulated fleet "runs", which picks the prices the report uses.
+REGION = "us-east-1"
+
 # A background story for when nobody is running a test: idle, a mild spell, idle,
 # one load episode, recovery. A 15-minute cycle, so the default 15m range shows
 # it once. The mild spell is sized to bother only the smallest box, the episode
@@ -82,6 +85,15 @@ STRESS_MB = 1600
 # After a test the background cycle stays quiet for a while, so the test's
 # result is not muddied by a simulated episode starting right behind it.
 QUIET_AFTER_TEST = 180.0
+
+# One finished test already in the history, so the right-sizing report has
+# something to show the moment the page opens: a ramp past what a t3.medium
+# can hold, so every size's limit shows. It ends a few minutes before "now",
+# inside the default 15-minute range.
+DEMO_TEST = {"mode": "variable", "pattern": "ramp", "low_mb": 200,
+             "high_mb": 4000, "steps": 8, "step_sec": 60, "workers": 2,
+             "need_mb": 1600}
+DEMO_TEST_ENDS_AGO = 240.0
 
 # On a real t3.micro the OOM killer ends a stress run that does not fit. Past
 # this multiple of free memory, the simulated one is killed too.
@@ -113,6 +125,9 @@ class FakeMachine:
         # A load test started from the dashboard: {"id", "plan", "started"}.
         self.test = None
         self.killed_phases = set()
+        # The background cycle is silent from a test's start until a while
+        # after it ends.
+        self.quiet_from = 0.0
         self.quiet_until = 0.0
 
     # ---- load ----
@@ -120,11 +135,13 @@ class FakeMachine:
     def start_test(self, test_id, plan, now):
         self.test = {"id": test_id, "plan": plan, "started": now}
         self.killed_phases = set()
+        self.quiet_from = now
         self.quiet_until = now + plan["total_sec"] + QUIET_AFTER_TEST
 
     def stop_test(self, now):
         was_running = self.test_phase(now) is not None
         self.test = None
+        self.quiet_from = now
         self.quiet_until = now + QUIET_AFTER_TEST
         return was_running
 
@@ -144,7 +161,7 @@ class FakeMachine:
 
     def cycle_demand(self, ts):
         """MB the background story asks for at `ts`, when no test is running."""
-        if ts < self.quiet_until:
+        if self.quiet_from <= ts < self.quiet_until:
             return 0.0
         phase = ts % CYCLE_SEC
 
@@ -240,6 +257,7 @@ class FakeMachine:
             "psi_full": full,
             "instance_type": self.instance_type,
             "instance_id": self.instance_id,
+            "region": REGION,
             "mem_total_mb": self.mem_total_mb,
             "thresholds": THRESHOLDS,
             "baseline": self.analyzer.baseline,
@@ -277,6 +295,14 @@ def backfill(machines, now):
     """An hour of history, so the page has something on it immediately."""
     start = now - BACKFILL_SEC
     ticks = int(BACKFILL_SEC / TICK_SEC)
+
+    plan = loadtest.build_plan(DEMO_TEST)
+    test_id = "demo" + uuid.uuid4().hex[:4]
+    test_start = now - DEMO_TEST_ENDS_AGO - plan["total_sec"]
+    server.record_test(test_id, plan)
+    for machine in machines:
+        machine.start_test(test_id, plan, test_start)
+
     for i in range(ticks):
         ts = start + i * TICK_SEC
         for machine in machines:
@@ -309,6 +335,7 @@ def install_demo_routes(machines):
             return jsonify({"error": "A test is already running on the simulated "
                                      "fleet. Stop it first."}), 409
         test_id = uuid.uuid4().hex[:8]
+        server.record_test(test_id, plan)
         for machine in machines:
             machine.start_test(test_id, plan, now)
         return jsonify({

@@ -1,6 +1,27 @@
-# SysHealth — Real-Time Cloud Instance Health Monitor
+# SysHealth — Find the right instance size for your app
 
-A lightweight, self-hosted framework for monitoring memory health across AWS EC2 instances in real time. Uses Linux PSI (Pressure Stall Information) kernel metrics, a Flask central server, and a live web dashboard with per-instance health cards and time-series charts.
+SysHealth tells you **which instance size to buy for your app, and shows the
+evidence**. It runs the memory your app needs on several sizes at once, measures
+how long programs wait for memory on each (Linux PSI, Pressure Stall
+Information), and names the cheapest size that holds your app's peak with room
+to spare, in dollars a month. A Flask server collects the agents' samples and
+serves a live dashboard; the answer is also one API call away.
+
+### Why not just Prometheus?
+
+Prometheus with node_exporter already collects memory PSI, and Grafana can graph
+it. If all you need is to *watch* pressure, use them. SysHealth does what a
+monitor cannot, because a monitor only observes:
+
+| | Prometheus + Grafana | SysHealth |
+|---|---|---|
+| Memory pressure (PSI) over time | Yes | Yes |
+| Thresholds for "degraded" and "critical" | You write the rules | Built in, from published production systems ([docs](docs/thresholds.md)) |
+| Applies a load, the same on every size at the same moment | No | Yes: peak, ramp, up-and-down, bursts |
+| Knows what load caused a reading | No | Yes, every sample carries the test step |
+| How much memory each size can hold before your app slows down | No | Yes, from the pressure at each load level |
+| Which size to buy, and what it costs | No | Yes: the cheapest size that fits, priced, with what the others would cost |
+| Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
 
 ---
 
@@ -43,6 +64,10 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
 - **⚡ Load test** — a form for the load your app actually has, run on every
   online instance at the same moment ([below](#load-tests)). The test's load is
   drawn as a track above the graph, so pressure lines up with what caused it
+- **Which size to choose** — after a test, the cheapest size that holds your
+  app's peak with the room to spare you ask for, priced per month, with a chart
+  of pressure against load that shows where each size gives out
+  ([below](#right-sizing-which-size-to-buy))
 
 ---
 
@@ -245,6 +270,7 @@ reported as each machine's idle reference, but states no longer depend on it.
 | POST | `/load-plan` | Preview a load test: the plan and the commands, without running it |
 | POST | `/run-stress` | Run a load test on all online agents (no body: the old default test) |
 | POST | `/stop-stress` | Stop the running load test on all online agents |
+| GET | `/report` | Which size to buy, from the last test: `?need_mb=` your app's peak, `?margin=` % spare, `?test_id=` an earlier test |
 
 ```bash
 # List all instances
@@ -258,6 +284,9 @@ curl -X POST http://YOUR_SERVER_IP:5000/run-stress -H 'Content-Type: application
   -d '{"mode":"variable","pattern":"ramp","low_mb":200,"high_mb":1600,"steps":5,"step_sec":60,"workers":2}'
 
 curl -X POST http://YOUR_SERVER_IP:5000/stop-stress
+
+# Which size to buy for an app that peaks at 1.2 GB, keeping 30% spare
+curl 'http://YOUR_SERVER_IP:5000/report?need_mb=1200&margin=30'
 ```
 
 ---
@@ -271,7 +300,7 @@ moment.
 | Test | Fields | Answers |
 |---|---|---|
 | **Peak load** | Memory to hold (MB), how long | Can each size take my app at its busiest? |
-| **Variable load: ramp up** | From / to (MB), steps, seconds per step | At what load does each size start to struggle? |
+| **Variable load: ramp up** | Your app's peak, from / to (MB), steps, seconds per step | How much can each size hold before it slows down? |
 | **Variable load: up and down** | Same | A day of traffic: does each size recover when load drops? |
 | **Variable load: bursts** | Base / spike (MB), how many, seconds each | How does each size take short spikes? |
 
@@ -279,10 +308,10 @@ Before anything runs, the panel previews the plan as a chart, with each
 instance's RAM drawn on it. It shows the peak as a share of that RAM ("168% of
 t3.micro's memory") and the exact `stress` command each step becomes. While it
 runs, a chip in the top bar shows the step and time left, and **Stop test** ends
-it everywhere. Afterwards the panel reports, per instance: the outcome, the worst
-minute, and — for variable tests — the load it was fine up to and where it turned
-Degraded and Critical. It then names the **smallest instance that stayed
-healthy**.
+it everywhere. Afterwards the panel says which size to choose
+([below](#right-sizing-which-size-to-buy)) and reports, per instance, the
+outcome, how much it holds, the room it leaves, its price, the worst minute and
+the sharpest spike.
 
 Each step is one run of `stress --vm <workers> --vm-bytes <MB per worker>M
 --vm-keep --timeout <s>s`. A step always lasts its planned time, even if the OOM
@@ -295,6 +324,42 @@ before running it, because its control port is on the network.
 
 ---
 
+## Right-sizing: which size to buy
+
+The question a load test is run to answer. `rightsize.py` works it out on the
+server from the samples the agents already send, so the dashboard and
+`GET /report` give the same answer.
+
+1. **Pressure at each load level.** For each size, the average pressure while
+   each level was held, skipping the first 10 s of each step while the 10-second
+   reading settles. A level where the kernel killed the test counts as failed:
+   once `stress` is killed its memory is freed, and the readings alone would
+   make the level look fine.
+2. **How much each size holds.** The most memory it held while staying under
+   the degraded line. Between the last level it held and the first it did not,
+   the crossing is interpolated on the pressure. Pressure rises faster than
+   linearly with load, so the estimate errs low.
+3. **Room to spare.** Your app's peak plus a margin, 25% unless you change it,
+   for growth and for the OS cache. A ramp up past your app's peak measures how
+   much room each size really leaves; a peak test can only say it held the peak.
+4. **The verdict.** The cheapest size that holds the peak plus the margin, and
+   what the alternatives would mean: "t3.small would save $15.18 a month, but it
+   holds only about 1.4 GB before slowing down."
+
+Your app's peak is asked for on the form (for a peak test it is the memory
+held), and it and the margin can be changed afterwards on the panel, or with
+`?need_mb=` and `?margin=`: no need to run the test again.
+
+**Prices** are AWS's on-demand Linux list prices for the region each agent
+reports, from `data/prices.json`. The file records the date it was fetched,
+and the report shows it. `python3 tools/update_prices.py` refreshes it from
+AWS's public price list, with no AWS account needed. For a discounted rate, a
+family it does not cover or another cloud, point `SYSHEALTH_PRICES_FILE` at a
+JSON file of your own (`{"t3.micro": 0.0104}`, or by region); it always wins.
+Agents off EC2 can set `SYSHEALTH_INSTANCE_TYPE` and `SYSHEALTH_INSTANCE_REGION`.
+
+---
+
 ## Project Structure
 
 ```
@@ -304,7 +369,9 @@ syshealth/
 ├── analyzer.py        # Sliding-window PSI classifier, thresholds at the top
 ├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, MemTotal
 ├── loadtest.py        # Load-test plans: built from the form, checked by the agent
-├── instance.py        # Instance type/id via IMDSv2, so sizes can be compared
+├── rightsize.py       # What a test says each size holds, and which size to buy
+├── pricing.py         # What each size costs, from data/prices.json
+├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
 ├── deploy.sh          # One-command deploy to all EC2 instances
@@ -313,6 +380,11 @@ syshealth/
 ├── static/
 │   ├── css/dashboard.css
 │   └── js/dashboard.js   # Pressure graph and load-test panel, inline SVG — no libraries
+├── data/
+│   └── prices.json    # AWS on-demand list prices, dated (tools/update_prices.py)
+├── tools/
+│   └── update_prices.py  # Refresh data/prices.json from AWS's public price list
+├── tests/             # python3 -m unittest discover -s tests  (or npm test)
 ├── docs/
 │   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply

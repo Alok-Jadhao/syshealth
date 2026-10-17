@@ -1,4 +1,4 @@
-from collections import defaultdict, deque
+from collections import OrderedDict, defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import time
@@ -9,6 +9,7 @@ from flask import Flask, request, jsonify, render_template
 
 import instance
 import loadtest
+import rightsize
 
 app = Flask(__name__)
 
@@ -17,6 +18,7 @@ app = Flask(__name__)
 HISTORY_LIMIT = 720
 ONLINE_WINDOW_SEC = 15
 AGENT_CONTROL_PORT = 5001
+TESTS_KEPT = 50
 
 instances = defaultdict(lambda: {
     "hostname": None,
@@ -27,6 +29,17 @@ instances = defaultdict(lambda: {
     "latest": None,
     "history": deque(maxlen=HISTORY_LIMIT),
 })
+
+# The plans this server started, by test id, so a report can say what was
+# asked for even when the test was stopped part-way. In memory, like the
+# history, and only the most recent few.
+tests = OrderedDict()
+
+
+def record_test(test_id, plan):
+    tests[test_id] = {"plan": plan, "started": time.time()}
+    while len(tests) > TESTS_KEPT:
+        tests.popitem(last=False)
 
 
 @app.route("/")
@@ -118,6 +131,45 @@ def series():
         })
     payload.sort(key=by_size)
     return jsonify({"instances": payload})
+
+
+def snapshot():
+    """Every instance and its history, copied, as rightsize.py reads them."""
+    now = time.time()
+    out = []
+    for host, inst in list(instances.items()):
+        out.append({
+            "hostname": host,
+            "instance_type": inst["instance_type"],
+            "online": (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC,
+            "samples": list(inst["history"]),
+        })
+    out.sort(key=by_size)
+    return out
+
+
+def _arg_int(name, low, high, label):
+    raw = request.args.get(name, "").strip()
+    if not raw:
+        return None
+    return loadtest._int({name: raw}, name, low, high, label)
+
+
+@app.route("/report", methods=["GET"])
+def test_report():
+    """What the last load test (or ?test_id=) says about each size.
+
+    ?need_mb= is the app's memory at its busiest (default: the test's peak),
+    ?margin= the share to keep spare on top, in % (default 25).
+    """
+    try:
+        need = _arg_int("need_mb", 1, loadtest.LIMITS["max_mb"], "Your app's memory")
+        margin = _arg_int("margin", 0, rightsize.MAX_MARGIN_PCT, "Room to spare")
+    except loadtest.PlanError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(rightsize.report(
+        snapshot(), request.args.get("test_id") or None,
+        need_mb=need, margin_pct=margin, plans=tests))
 
 
 def _plan_from_request():
@@ -213,6 +265,7 @@ def run_stress():
         }), 409
 
     test_id = uuid.uuid4().hex[:8]
+    record_test(test_id, plan)
     results = {}
     targets = _online_targets(now, results)
     body = {"test_id": test_id, "plan": plan}

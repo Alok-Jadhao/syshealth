@@ -35,7 +35,8 @@
   var MODE_HELP = {
     peak: 'One level, held for the whole test. Answers: can each size take my app at its busiest?',
     ramp: 'Climbs from the lowest level to the highest in even steps. ' +
-          'Answers: at what load does each size start to struggle?',
+          'Answers: how much memory can each size hold before it slows down? ' +
+          'Go past your app\'s busiest to see the room each size leaves.',
     wave: 'Climbs, then comes back down, like a day of traffic. ' +
           'Shows whether each size recovers once the load drops.',
     bursts: 'Alternates between a base load and a spike. Shows how each size handles short peaks.'
@@ -65,6 +66,11 @@
     testMode: 'peak',
     testPattern: 'ramp',
     preview: null,
+    // The right-sizing report for the last test, from GET /report.
+    report: null,
+    reportError: null,
+    // The test the "your app needs" box was typed against.
+    needFor: null,
     // The agents report a test only in their next sample, up to a poll and a
     // push later. These bridge that gap, so the page does not offer Start
     // again just after it was pressed, or show a test it was just told to stop.
@@ -1872,6 +1878,7 @@
       spec.duration_sec = value('duration_sec');
     } else {
       spec.pattern = state.testPattern;
+      spec.need_mb = value('need_mb');
       spec.low_mb = value('low_mb');
       spec.high_mb = value('high_mb');
       spec.steps = value('steps');
@@ -2001,6 +2008,21 @@
       svg.appendChild(label);
     });
 
+    // What the app needs, so the steps past it read as the headroom probe
+    // they are. A peak test holds exactly that, so it needs no extra line.
+    if (plan.mode === 'variable' && plan.need_mb && plan.need_mb <= top) {
+      svg.appendChild(svgEl('line', {
+        x1: pad.left, x2: pad.left + plotW, y1: y(plan.need_mb), y2: y(plan.need_mb),
+        stroke: 'var(--text-primary)', 'stroke-width': 1.5, 'stroke-opacity': 0.7
+      }));
+      var needLabel = svgEl('text', {
+        x: pad.left + 4, y: y(plan.need_mb) - 4, fill: 'var(--text-primary)', 'font-size': 10,
+        stroke: 'var(--surface-1)', 'stroke-width': 3, 'paint-order': 'stroke fill'
+      });
+      needLabel.textContent = 'Your app · ' + formatMb(plan.need_mb);
+      svg.appendChild(needLabel);
+    }
+
     var d = '';
     var at = 0;
     plan.phases.forEach(function (phase, i) {
@@ -2056,175 +2078,150 @@
     });
   }
 
-  // How each instance coped with one test, read back from its samples.
-  function testResults(testId) {
-    var info = null;
-    var rows = [];
-    var running = false;
+  /* ---------- right-sizing report ---------- */
 
-    state.instances.forEach(function (inst) {
-      var during = inst.samples.filter(function (s) {
-        return s.test && s.test.id === testId;
-      });
-      if (!during.length) {
-        return;
-      }
-      info = during[during.length - 1].test;
-      var th = thresholdsOf([inst]);
-      var start = during[0].t;
-      var end = during[during.length - 1].t;
-      if (currentTest({ all: inst.samples, online: inst.online }) &&
-          currentTest({ all: inst.samples, online: inst.online }).id === testId) {
-        running = true;
-      }
+  // The report is worked out on the server (rightsize.py), so the page, a
+  // script calling GET /report and a CLI all get the same answer.
+  var REPORT_PREFS_KEY = 'syshealth.rightsize';
+  var reportTimer = null;
+  var reportSeq = 0;
 
-      // The state is judged on a minute and must hold for 15 s, so it trails
-      // the load: look a minute past the end for the worst of it.
-      var worstRank = 0;
-      var worstState = 'UNKNOWN';
-      var worstMinute = 0;
-      inst.samples.forEach(function (s) {
-        if (s.t < start || s.t > end + 60000) {
+  // Only the margin is remembered: it is a policy. The app's need belongs to
+  // the test it was typed against (see needFor).
+  function loadReportPrefs() {
+    try {
+      var saved = JSON.parse(window.localStorage.getItem(REPORT_PREFS_KEY) || '{}');
+      if (saved.margin !== undefined && saved.margin !== '') {
+        $('#rs-margin').value = saved.margin;
+      }
+    } catch (e) {
+      /* Private window or blocked storage: the defaults will do. */
+    }
+  }
+
+  function saveReportPrefs() {
+    try {
+      window.localStorage.setItem(REPORT_PREFS_KEY, JSON.stringify({
+        margin: $('#rs-margin').value.trim()
+      }));
+    } catch (e) {
+      /* Not worth telling anyone about. */
+    }
+  }
+
+  function reportSoon() {
+    window.clearTimeout(reportTimer);
+    reportTimer = window.setTimeout(fetchReport, 300);
+  }
+
+  function fetchReport() {
+    var seq = ++reportSeq;
+    var params = [];
+    // A need typed against an earlier test does not carry over to a new one:
+    // the new test was planned with its own.
+    var currentId = state.report ? state.report.test_id : null;
+    var need = state.needFor && state.needFor === currentId ? $('#rs-need').value.trim() : '';
+    var margin = $('#rs-margin').value.trim();
+    if (need) {
+      params.push('need_mb=' + encodeURIComponent(need));
+    }
+    if (margin) {
+      params.push('margin=' + encodeURIComponent(margin));
+    }
+    return fetch('report' + (params.length ? '?' + params.join('&') : ''), {
+      headers: { Accept: 'application/json' }
+    })
+      .then(function (response) {
+        return response.json().then(function (data) {
+          return { ok: response.ok, data: data };
+        });
+      })
+      .then(function (result) {
+        if (seq !== reportSeq) {
           return;
         }
-        var rank = STATE_RANK[stateKey(s.state)];
-        if (rank > worstRank) {
-          worstRank = rank;
-          worstState = s.state;
+        if (!result.ok) {
+          state.reportError = result.data.error || 'Could not work out the report.';
+        } else {
+          state.report = result.data;
+          state.reportError = null;
         }
-        worstMinute = Math.max(worstMinute, s.avgPsi);
+        renderResults();
+      })
+      .catch(function () {
+        /* The next poll tries again; the last report stays on screen. */
       });
-
-      var worst10 = 0;
-      var killed = 0;
-      var byStep = {};
-      during.forEach(function (s) {
-        worst10 = Math.max(worst10, s.psi);
-        killed = Math.max(killed, s.test.killed);
-        (byStep[s.test.step] = byStep[s.test.step] || []).push(s);
-      });
-
-      // Sustained pressure at each load level: the mean of a step's readings,
-      // so one spike does not condemn a level any more than it changes a
-      // state. Each step's first 10 s are skipped - the 10-second reading
-      // still carries the step before it, which on the way down would blame a
-      // low level for a high one's pressure. A level met twice (a wave, or
-      // bursts) is judged by its worse visit.
-      var levels = {};
-      Object.keys(byStep).forEach(function (step) {
-        var samples = byStep[step];
-        var settled = samples.filter(function (s) {
-          return s.t >= samples[0].t + 10000;
-        });
-        if (!settled.length) {
-          settled = samples;
-        }
-        var mb = samples[0].test.mb;
-        var level = levels[mb] = levels[mb] || { mb: mb, some: 0, full: 0 };
-        var some = 0;
-        var full = 0;
-        settled.forEach(function (s) {
-          some += s.psi;
-          full += s.psiFull || 0;
-        });
-        level.some = Math.max(level.some, some / settled.length);
-        level.full = Math.max(level.full, full / settled.length);
-      });
-      var ordered = Object.keys(levels).map(function (k) {
-        return levels[k];
-      }).sort(function (a, b) {
-        return a.mb - b.mb;
-      });
-
-      var fineUpTo = null;
-      var degradedFrom = null;
-      var criticalFrom = null;
-      var stillFine = true;
-      ordered.forEach(function (level) {
-        var critical = level.some >= th.critical || level.full >= th.critical_full;
-        var degraded = level.some >= th.degraded;
-        if (critical && criticalFrom === null) {
-          criticalFrom = level.mb;
-        }
-        if ((degraded || critical) && degradedFrom === null) {
-          degradedFrom = level.mb;
-        }
-        if (degraded || critical) {
-          stillFine = false;
-        } else if (stillFine) {
-          fineUpTo = level.mb;
-        }
-      });
-
-      // How bad it got: the worse of the states it reported and the
-      // sustained pressure at its worst load level. Both count - with short
-      // steps the one-minute state never catches up with a level that was
-      // plainly too much.
-      var levelRank = criticalFrom !== null ? 3 : degradedFrom !== null ? 2 : ordered.length ? 1 : 0;
-
-      rows.push({
-        inst: inst,
-        rank: Math.max(STATE_RANK[stateKey(worstState)], levelRank),
-        worstState: worstState,
-        worstMinute: worstMinute,
-        worst10: worst10,
-        killed: killed,
-        fineUpTo: fineUpTo,
-        degradedFrom: degradedFrom,
-        criticalFrom: criticalFrom
-      });
-    });
-
-    return { info: info, running: running, rows: rows };
   }
 
-  function lastTestId() {
-    var newest = null;
-    var id = null;
-    state.instances.forEach(function (inst) {
-      for (var i = inst.samples.length - 1; i >= 0; i--) {
-        if (inst.samples[i].test) {
-          if (newest === null || inst.samples[i].t > newest) {
-            newest = inst.samples[i].t;
-            id = inst.samples[i].test.id;
-          }
-          break;
-        }
+  function instanceFor(hostname, type) {
+    for (var i = 0; i < state.instances.length; i++) {
+      if (state.instances[i].id === hostname) {
+        return state.instances[i];
       }
-    });
-    return id;
+    }
+    return { id: hostname, label: type || hostname, color: instanceColor(type) };
   }
 
-  function outcome(row, running, variable) {
-    if (row.killed) {
-      return { key: 'critical', text: 'Ran out of memory: the kernel killed the test' };
+  function formatCapacity(cap) {
+    if (!cap) {
+      return '—';
     }
-    var key = ['unknown', 'healthy', 'degraded', 'critical'][row.rank];
-    var text = { critical: 'Could not cope', degraded: 'Coped, but slowed down',
-                 healthy: 'Coped comfortably', unknown: 'Too early to tell' }[key];
-    if (variable && key === 'critical' && row.criticalFrom !== null) {
-      text = 'Could not cope from ' + formatMb(row.criticalFrom);
-    } else if (variable && key === 'degraded' && row.degradedFrom !== null) {
-      text = 'Slowed down from ' + formatMb(row.degradedFrom);
-    } else if (running && key === 'healthy') {
-      text = 'No trouble so far';
+    if (cap.kind === 'at_least') {
+      return formatMb(cap.mb) + '+';
     }
-    return { key: key, text: text };
+    if (cap.kind === 'below') {
+      return 'under ' + formatMb(cap.mb);
+    }
+    return '~' + formatMb(cap.mb);
+  }
+
+  function formatSpare(row) {
+    var pct = row.spare_pct;
+    switch (row.fit) {
+      case 'fits':
+        return (row.capacity.kind === 'at_least' ? 'at least ' : '') + '+' + pct + '%';
+      case 'tight':
+        return '+' + pct + '% (tight)';
+      case 'unmeasured':
+        return 'held it; room not measured';
+      case 'too_small':
+        return 'too small';
+      default:
+        return 'not reached';
+    }
+  }
+
+  function formatMoney(usd) {
+    return '$' + (usd < 100 ? usd.toFixed(2) : Math.round(usd).toLocaleString());
   }
 
   function renderResults() {
-    var id = lastTestId();
+    var report = state.report;
     var box = $('#lt-results');
-    box.hidden = !id;
-    if (!id) {
+    box.hidden = !(report && report.test_id && report.rows);
+    if (box.hidden) {
       return;
     }
-    var result = testResults(id);
-    var variable = result.info && result.info.mode === 'variable';
+    var variable = report.mode === 'variable';
 
-    $('#lt-results-title').textContent = result.running ? 'Test in progress' : 'Last test';
-    $('#lt-results-summary').textContent = (result.info ? result.info.summary : '') +
-      (result.running ? ' · results so far' : '');
+    $('#lt-results-title').textContent = report.running ? 'Test in progress' : 'Last test';
+    $('#lt-results-summary').textContent = report.summary + (report.running ? ' · results so far' : '');
+
+    // The recommendation.
+    var rec = report.recommendation;
+    if (state.needFor !== report.test_id && $('#rs-need').value) {
+      $('#rs-need').value = '';
+    }
+    $('#rs-need').placeholder = report.default_need_mb ? String(report.default_need_mb) : '';
+    $('#rs-headline').textContent = state.reportError || (rec ? rec.headline : '');
+    $('#rs-detail').textContent = state.reportError ? '' : (rec ? rec.detail : '');
+    $('#rs').setAttribute('data-verdict', state.reportError ? 'error'
+      : rec && rec.pick ? 'pick' : report.running ? 'running' : 'none');
+    var lines = $('#rs-lines');
+    clear(lines);
+    (rec && !state.reportError ? rec.lines : []).forEach(function (line) {
+      lines.appendChild(el('li', null, line));
+    });
 
     Array.prototype.forEach.call(box.querySelectorAll('th[data-variable]'), function (th) {
       th.hidden = !variable;
@@ -2232,51 +2229,253 @@
 
     var body = $('#lt-results-body');
     clear(body);
-    result.rows.forEach(function (row) {
+    report.rows.forEach(function (row) {
+      var inst = instanceFor(row.hostname, row.instance_type);
+      var picked = rec && rec.pick === row.hostname;
       var tr = document.createElement('tr');
+      if (picked) {
+        tr.className = 'is-pick';
+      }
+
       var instTd = document.createElement('td');
       var wrap = el('span', 'state-cell');
       var key = el('span', 'legend-key');
-      key.style.background = row.inst.color;
+      key.style.background = inst.color;
       wrap.appendChild(key);
-      wrap.appendChild(el('span', null, row.inst.label));
+      wrap.appendChild(el('span', null, inst.label));
+      if (picked) {
+        wrap.appendChild(el('span', 'pick-badge', 'Recommended'));
+      }
       instTd.appendChild(wrap);
       tr.appendChild(instTd);
 
-      var said = outcome(row, result.running, variable);
       var outTd = document.createElement('td');
       var outWrap = el('span', 'state-cell');
       var dot = el('span', 'state-dot');
-      dot.setAttribute('data-state', said.key);
+      dot.setAttribute('data-state', row.outcome.key);
       outWrap.appendChild(dot);
-      outWrap.appendChild(el('span', null, said.text));
+      outWrap.appendChild(el('span', null, row.outcome.text));
       outTd.appendChild(outWrap);
       tr.appendChild(outTd);
 
-      tr.appendChild(el('td', 'num', formatPct(row.worstMinute) + '%'));
-      tr.appendChild(el('td', 'num', formatPct(row.worst10) + '%'));
+      var capTd = el('td', 'num', formatCapacity(row.capacity));
+      if (row.capacity && row.capacity.kind === 'estimate') {
+        capTd.title = 'Held ' + formatMb(row.capacity.held_mb) + '; slowed down at ' +
+          formatMb(row.capacity.failed_mb) + '.';
+      }
+      tr.appendChild(capTd);
+      var spareTd = el('td', 'num', formatSpare(row));
+      spareTd.setAttribute('data-fit', row.fit);
+      tr.appendChild(spareTd);
+      tr.appendChild(el('td', 'num', row.price ? formatMoney(row.price.usd_month) : '—'));
+      tr.appendChild(el('td', 'num', formatPct(row.worst_minute) + '%'));
+      tr.appendChild(el('td', 'num', formatPct(row.worst_10s) + '%'));
       if (variable) {
-        tr.appendChild(el('td', 'num', row.fineUpTo === null ? 'not even the lowest' : formatMb(row.fineUpTo)));
-        tr.appendChild(el('td', 'num', row.degradedFrom === null ? 'never' : formatMb(row.degradedFrom)));
-        tr.appendChild(el('td', 'num', row.criticalFrom === null ? 'never' : formatMb(row.criticalFrom)));
+        tr.appendChild(el('td', 'num', row.critical_from === null ? 'never' : formatMb(row.critical_from)));
       }
       body.appendChild(tr);
     });
 
-    // The question the test was run to answer. Rows arrive smallest size
-    // first, so the first one that coped is the smallest that will do.
-    var verdict = '';
-    if (!result.running && result.rows.length > 1) {
-      var coped = result.rows.filter(function (row) {
-        return !row.killed && row.rank === STATE_RANK.healthy;
-      });
-      verdict = coped.length
-        ? 'Smallest instance that stayed healthy under this load: ' + coped[0].inst.label + '.'
-        : 'None of the instances stayed healthy under this load.';
-    } else if (result.running) {
-      verdict = 'The verdict appears when the test finishes. States lag the load by up to a minute.';
+    $('#rs-price-note').textContent = report.rows.some(function (r) { return r.price; })
+      ? report.prices.note
+      : 'No prices: the instances did not report a type and region that the price list covers.';
+
+    renderCurve(report);
+  }
+
+  // Pressure against memory held, one line per size: the capacity curve.
+  // Where a line crosses the degraded line is the most that size can hold.
+  function renderCurve(report) {
+    var wrapFig = $('#rs-curve-wrap');
+    var svg = $('#rs-chart');
+    var rows = (report && report.rows || []).filter(function (r) {
+      return r.levels && r.levels.length > 1;
+    });
+    clear(svg);
+    clear($('#rs-legend'));
+    wrapFig.hidden = !rows.length;
+    if (!rows.length) {
+      return;
     }
-    $('#lt-verdict').textContent = verdict;
+
+    var th = rows[0].thresholds || DEFAULT_THRESHOLDS;
+    var width = Math.max(280, Math.round($('#rs-plot').clientWidth) || 640);
+    var height = 240;
+    var narrow = width < 520;
+    var pad = { top: 26, right: 16, bottom: 30, left: narrow ? 40 : 48 };
+    var plotW = width - pad.left - pad.right;
+    var plotH = height - pad.top - pad.bottom;
+    svg.setAttribute('viewBox', '0 0 ' + width + ' ' + height);
+    svg.setAttribute('width', width);
+    svg.setAttribute('height', height);
+
+    var maxMb = 0;
+    var maxSome = 0;
+    rows.forEach(function (r) {
+      r.levels.forEach(function (lv) {
+        maxMb = Math.max(maxMb, lv.mb);
+        if (!lv.killed) {
+          maxSome = Math.max(maxSome, lv.some);
+        }
+      });
+    });
+    var need = report.need_mb;
+    var required = report.required_mb;
+    maxMb = Math.max(maxMb, required || 0);
+
+    // Memory in GB once it is big enough for GB to read better.
+    var inGb = maxMb >= 2048;
+    var xs = niceScale(inGb ? maxMb / 1024 : maxMb);
+    var xMax = xs.max * (inGb ? 1024 : 1);
+    var ys = niceScale(Math.max(maxSome, th.degraded * 1.5));
+    var killedY = pad.top - 10;
+
+    function x(mb) {
+      return pad.left + (mb / xMax) * plotW;
+    }
+    function y(v) {
+      return pad.top + plotH - (Math.min(v, ys.max) / ys.max) * plotH;
+    }
+
+    var grid = svgEl('g', {});
+    ys.ticks.forEach(function (v) {
+      grid.appendChild(svgEl('line', {
+        x1: pad.left, x2: pad.left + plotW, y1: y(v), y2: y(v),
+        stroke: v === 0 ? 'var(--axis)' : 'var(--gridline)', 'stroke-width': 1
+      }));
+      var t = svgEl('text', {
+        x: pad.left - 8, y: y(v) + 4, 'text-anchor': 'end',
+        fill: 'var(--text-muted)', 'font-size': 10, 'font-variant-numeric': 'tabular-nums'
+      });
+      t.textContent = v + '%';
+      grid.appendChild(t);
+    });
+    xs.ticks.forEach(function (v, i) {
+      var mb = v * (inGb ? 1024 : 1);
+      var t = svgEl('text', {
+        x: x(mb), y: height - 8,
+        'text-anchor': i === 0 ? 'start' : i === xs.ticks.length - 1 ? 'end' : 'middle',
+        fill: 'var(--text-muted)', 'font-size': 10, 'font-variant-numeric': 'tabular-nums'
+      });
+      t.textContent = v === 0 ? '0' : v + (inGb ? ' GB' : ' MB');
+      grid.appendChild(t);
+    });
+    svg.appendChild(grid);
+
+    // The degraded band, and the critical line when the data gets near it.
+    var bandTop = y(Math.min(th.critical, ys.max));
+    svg.appendChild(svgEl('rect', {
+      x: pad.left, y: bandTop, width: plotW, height: Math.max(0, y(th.degraded) - bandTop),
+      fill: 'var(--status-warning)', 'fill-opacity': 0.07
+    }));
+    [[th.degraded, 'Degraded ' + th.degraded + '%', 'var(--status-warning)'],
+     [th.critical, 'Critical ' + th.critical + '%', 'var(--status-critical)']].forEach(function (line) {
+      if (line[0] > ys.max) {
+        return;
+      }
+      svg.appendChild(svgEl('line', {
+        x1: pad.left, x2: pad.left + plotW, y1: y(line[0]), y2: y(line[0]),
+        stroke: 'var(--text-muted)', 'stroke-width': 1, 'stroke-dasharray': '4 3'
+      }));
+      svg.appendChild(svgEl('circle', {
+        cx: pad.left + 6, cy: y(line[0]) - 9, r: 3.5, fill: line[2],
+        stroke: 'var(--surface-1)', 'stroke-width': 1.5
+      }));
+      var label = svgEl('text', {
+        x: pad.left + 14, y: y(line[0]) - 5, fill: 'var(--text-secondary)', 'font-size': 10,
+        stroke: 'var(--surface-1)', 'stroke-width': 3, 'paint-order': 'stroke fill'
+      });
+      label.textContent = line[1];
+      svg.appendChild(label);
+    });
+
+    // The app's need, and the need plus the room to spare. Labelled on the
+    // floor, where the sizes that cope run flat: the need to the left of its
+    // line, the margin to the right of its own, so the two never overlap.
+    if (need) {
+      [[need, 'Your app · ' + formatMb(need), 'end', '0'],
+       [required, '+' + report.margin_pct + '% spare', 'start', '2 3']].forEach(function (mark, i) {
+        if (!mark[0] || (i === 1 && mark[0] === need)) {
+          return;
+        }
+        svg.appendChild(svgEl('line', {
+          x1: x(mark[0]), x2: x(mark[0]), y1: pad.top, y2: pad.top + plotH,
+          stroke: 'var(--text-primary)', 'stroke-width': i ? 1 : 1.5,
+          'stroke-dasharray': mark[3], 'stroke-opacity': i ? 0.5 : 0.8
+        }));
+        var label = svgEl('text', {
+          x: x(mark[0]) + (i ? 4 : -4), y: pad.top + plotH - 6, 'text-anchor': mark[2],
+          fill: 'var(--text-secondary)', 'font-size': 10,
+          stroke: 'var(--surface-1)', 'stroke-width': 3, 'paint-order': 'stroke fill'
+        });
+        label.textContent = mark[1];
+        svg.appendChild(label);
+      });
+    }
+
+    var anyKilled = false;
+    rows.forEach(function (r) {
+      var inst = instanceFor(r.hostname, r.instance_type);
+      var held = r.levels.filter(function (lv) {
+        return !lv.killed;
+      });
+      if (held.length) {
+        var d = held.map(function (lv, i) {
+          return (i ? 'L' : 'M') + x(lv.mb).toFixed(1) + ' ' + y(lv.some).toFixed(1);
+        }).join(' ');
+        var path = svgEl('path', {
+          d: d, fill: 'none', stroke: inst.color, 'stroke-width': 2,
+          'stroke-linejoin': 'round', 'stroke-linecap': 'round'
+        });
+        if (inst.dash) {
+          path.setAttribute('stroke-dasharray', inst.dash);
+        }
+        svg.appendChild(path);
+        held.forEach(function (lv) {
+          svg.appendChild(svgEl('circle', {
+            cx: x(lv.mb), cy: y(lv.some), r: 3, fill: inst.color,
+            stroke: 'var(--surface-1)', 'stroke-width': 1
+          }));
+        });
+      }
+      // A level where the kernel killed the test has no pressure to plot:
+      // mark it above the plot instead.
+      r.levels.forEach(function (lv) {
+        if (!lv.killed) {
+          return;
+        }
+        anyKilled = true;
+        var cx = x(lv.mb);
+        svg.appendChild(svgEl('path', {
+          d: 'M' + (cx - 4) + ' ' + (killedY - 4) + ' L' + (cx + 4) + ' ' + (killedY + 4) +
+             ' M' + (cx + 4) + ' ' + (killedY - 4) + ' L' + (cx - 4) + ' ' + (killedY + 4),
+          stroke: inst.color, 'stroke-width': 2, 'stroke-linecap': 'round'
+        }));
+      });
+      // The capacity estimate sits where the line crosses the degraded line.
+      if (r.capacity && r.capacity.kind === 'estimate') {
+        svg.appendChild(svgEl('circle', {
+          cx: x(r.capacity.mb), cy: y(th.degraded), r: 5, fill: 'var(--surface-1)',
+          stroke: inst.color, 'stroke-width': 2
+        }));
+      }
+
+      var item = el('li', 'legend-item');
+      var key = el('span', 'legend-key');
+      key.style.background = inst.color;
+      item.appendChild(key);
+      item.appendChild(el('span', null, inst.label + ' · holds ' + formatCapacity(r.capacity)));
+      $('#rs-legend').appendChild(item);
+    });
+
+    if (anyKilled) {
+      $('#rs-legend').appendChild(el('li', 'legend-item rs-legend-note',
+        '✕ above the plot: the kernel killed the test at that level'));
+    }
+
+    svg.setAttribute('aria-label', 'Memory pressure against memory held. ' + rows.map(function (r) {
+      return instanceFor(r.hostname, r.instance_type).label + ' holds ' + formatCapacity(r.capacity);
+    }).join('; ') + (need ? '. Your app needs ' + formatMb(need) + '.' : '.'));
   }
 
   function renderLoadTest() {
@@ -2306,7 +2505,7 @@
     $('#lt-stop').disabled = !busy;
 
     if (!$('#loadtest-panel').hidden) {
-      renderResults();
+      fetchReport();
     }
   }
 
@@ -2327,7 +2526,7 @@
     $('#loadtest-toggle').setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
       previewNow();
-      renderResults();
+      fetchReport();
     }
   }
 
@@ -2357,6 +2556,16 @@
       previewSoon();
     });
     form.addEventListener('input', previewSoon);
+
+    loadReportPrefs();
+    $('#rs-need').addEventListener('input', function () {
+      state.needFor = state.report ? state.report.test_id : null;
+      reportSoon();
+    });
+    $('#rs-margin').addEventListener('input', function () {
+      saveReportPrefs();
+      reportSoon();
+    });
 
     form.addEventListener('submit', function (event) {
       event.preventDefault();
@@ -2472,6 +2681,14 @@
         window.clearTimeout(pendingPreview);
         pendingPreview = window.setTimeout(renderPreview, 80);
       }).observe($('#lt-plot'));
+
+      var pendingCurve = null;
+      new window.ResizeObserver(function () {
+        window.clearTimeout(pendingCurve);
+        pendingCurve = window.setTimeout(function () {
+          renderCurve(state.report);
+        }, 80);
+      }).observe($('#rs-plot'));
     }
 
     document.addEventListener('visibilitychange', function () {

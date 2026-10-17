@@ -36,6 +36,10 @@ LIMITS = {
 # `curl -X POST /run-stress` still means the same thing.
 DEFAULT_SPEC = {"mode": "peak", "memory_mb": 1600, "workers": 2, "duration_sec": 60}
 
+# need_mb is what the app itself uses at its busiest. The right-sizing report
+# judges every size against it. A peak test holds exactly that; a variable
+# test usually goes past it, to see how much room each size leaves.
+
 
 class PlanError(ValueError):
     """A spec or plan that cannot be run. The message is shown to the user."""
@@ -90,6 +94,7 @@ def build_plan(spec):
                        LIMITS["max_phase_sec"], "Duration")
         phases = [{"mb": mb, "seconds": seconds}]
         pattern = None
+        need = mb
     else:
         pattern = spec.get("pattern", "ramp")
         if pattern not in PATTERNS:
@@ -103,13 +108,17 @@ def build_plan(spec):
                         LIMITS["max_phase_sec"], "Seconds per step")
         phases = [{"mb": int(round(level)), "seconds": step_sec}
                   for level in _levels(pattern, low, high, steps)]
+        need = None
+        if spec.get("need_mb") not in (None, ""):
+            need = _int(spec, "need_mb", 1, LIMITS["max_mb"], "Your app's memory")
 
     # The actual total stress will hold: per-worker size times workers.
     for phase in phases:
         if phase["mb"] > 0:
             phase["mb"] = per_worker_mb(phase["mb"], workers) * workers
 
-    plan = {"mode": mode, "pattern": pattern, "workers": workers, "phases": phases}
+    plan = {"mode": mode, "pattern": pattern, "workers": workers, "phases": phases,
+            "need_mb": need}
     return validate_plan(plan)
 
 
@@ -153,6 +162,10 @@ def validate_plan(plan):
         raise PlanError("The whole test must fit in %d minutes; this one takes %d."
                         % (LIMITS["max_total_sec"] // 60, -(-total // 60)))
 
+    need = None
+    if plan.get("need_mb") not in (None, ""):
+        need = _int(plan, "need_mb", 1, LIMITS["max_mb"], "Your app's memory")
+
     return {
         "mode": mode,
         "pattern": pattern,
@@ -160,6 +173,7 @@ def validate_plan(plan):
         "phases": phases,
         "total_sec": total,
         "peak_mb": max(p["mb"] for p in phases),
+        "need_mb": need,
         "summary": summarize(mode, pattern, phases),
     }
 

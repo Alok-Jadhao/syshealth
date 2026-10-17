@@ -1131,14 +1131,142 @@ main {
   font-weight: 600;
 }
 
-.lt-verdict {
-  margin: 8px 0 10px;
-  font-size: 14px;
+/* The right-sizing verdict: the answer the test was run for, so it leads. */
+.rs {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-muted);
+  border-radius: var(--radius);
+  background: var(--plane);
+}
+
+.rs[data-verdict="pick"] {
+  border-left-color: var(--status-good);
+}
+
+.rs[data-verdict="none"],
+.rs[data-verdict="error"] {
+  border-left-color: var(--status-warning);
+}
+
+.rs-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+}
+
+.rs-title {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.rs-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.rs-inputs .input-unit input {
+  width: 96px;
+}
+
+.rs-headline {
+  margin: 4px 0 0;
+  font-size: 18px;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.rs-headline:empty {
+  display: none;
+}
+
+.rs-detail {
+  margin: 0;
+  max-width: 80ch;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.rs-lines {
+  display: grid;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.rs-lines:empty {
+  display: none;
+}
+
+.rs-curve {
+  margin: 0 0 16px;
+}
+
+.rs-curve-head {
+  display: grid;
+  gap: 2px;
+  margin-bottom: 6px;
+}
+
+.rs-curve-title {
+  font-size: 13px;
   font-weight: 600;
 }
 
-.lt-verdict:empty {
-  display: none;
+.rs-curve-sub {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.rs-legend {
+  margin-bottom: 6px;
+}
+
+.rs-legend-note {
+  color: var(--text-muted);
+}
+
+.rs-chart {
+  display: block;
+  width: 100%;
+}
+
+.pick-badge {
+  padding: 0 7px;
+  border: 1px solid var(--status-good);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.data-table tr.is-pick td {
+  font-weight: 600;
+}
+
+.data-table td[data-fit="too_small"] {
+  color: var(--status-critical);
+}
+
+.data-table td[data-fit="tight"],
+.data-table td[data-fit="unmeasured"],
+.data-table td[data-fit="untested"] {
+  color: var(--text-secondary);
 }
 
 .lt-note {

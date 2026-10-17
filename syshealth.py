@@ -272,6 +272,7 @@ def main():
                 # What the dashboard groups, orders and colours machines by.
                 "instance_type": identity["instance_type"],
                 "instance_id": identity["instance_id"],
+                "region": identity["region"],
                 "mem_total_mb": mem_total_mb,
                 # The lines the state was decided against, so the dashboard
                 # draws exactly what this agent used.

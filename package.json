@@ -5,6 +5,7 @@
   "description": "Memory-pressure monitoring across AWS instance sizes. The project is Python; this file exists only so the dashboard can be previewed with the usual `npm run dev`.",
   "scripts": {
     "dev": "python3 dev.py",
+    "test": "python3 -m unittest discover -s tests",
     "start": "python3 server.py",
     "agent": "python3 syshealth.py",
     "calibrate": "python3 syshealth.py calibrate"
