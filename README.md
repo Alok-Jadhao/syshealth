@@ -100,7 +100,8 @@ Same stress test (`stress --vm 2 --vm-bytes 800M --vm-keep`) run on all four ins
 > thresholds below replace, and `full` pressure was not recorded then. By peak
 > `some` alone, micro and small fall in the new Degraded band (10–40%). The
 > micro also had its job killed by the OOM killer, which the load-test results
-> now report directly. Re-run with a load test before quoting these.
+> now report directly. Re-run before quoting these: `terraform/rightsize.sh`
+> does the whole experiment, fleet up to fleet down, in one command.
 
 ---
 
