@@ -377,6 +377,38 @@ Agents off EC2 can set `SYSHEALTH_INSTANCE_TYPE` and `SYSHEALTH_INSTANCE_REGION`
 
 ---
 
+## From the command line, or CI
+
+`cli.py` drives any SysHealth server, the demo included, with nothing but the
+Python standard library:
+
+```bash
+python3 cli.py status                                   # who is reporting, and their state
+python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+python3 cli.py report --need 1200 --margin 30            # the last test, judged again
+python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
+```
+
+`run` starts the test on every instance, shows its progress, then prints the
+verdict: the table of sizes, the pick, what the alternatives would cost, and
+the usage-alarm comparison. It exits 0 when a size was recommended, 2 when none
+fits or the test fell short of the app's need, and 3 when `--expect` named a
+different size. That makes it a CI gate: fail the build when the app has
+outgrown the size it is deployed on. Ctrl-C stops the test everywhere.
+`--dry-run` checks a test without running it. The server is `--server`,
+`$SYSHEALTH_URL`, or `http://127.0.0.1:5000`.
+
+**The whole experiment in one command.** `terraform/rightsize.sh` builds a fleet
+of the sizes you name, waits for them, runs the test, saves the report and
+destroys the fleet again, also on failure or Ctrl-C
+([terraform/README.md](terraform/README.md#or-all-of-it-in-one-command)):
+
+```bash
+cd terraform && ./rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+```
+
+---
+
 ## Why: the likely cause
 
 PSI says how much time programs lost waiting for memory, not why, and the fix
@@ -447,6 +479,7 @@ syshealth/
 ├── rightsize.py       # What a test says each size holds, and which size to buy
 ├── diagnose.py        # Where the memory is, the likely cause, growing processes
 ├── prometheus.py      # GET /metrics in Prometheus's text format
+├── cli.py             # Run a test and print the verdict; exit codes for CI
 ├── pricing.py         # What each size costs, from data/prices.json
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
@@ -465,7 +498,8 @@ syshealth/
 ├── docs/
 │   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply
-    └── check.sh       # Which sizes are reporting, and why one is not
+    ├── check.sh       # Which sizes are reporting, and why one is not
+    └── rightsize.sh   # Build, test, report and destroy, in one command
 ```
 
 ---

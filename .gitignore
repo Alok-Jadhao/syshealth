@@ -15,3 +15,9 @@ terraform/*.tfvars
 terraform/*.tfvars.bak
 terraform/.relaunch.plan
 terraform/.terraform.lock.hcl
+
+# Reports saved by cli.py --save and terraform/rightsize.sh.
+rightsize-*.json
+
+# Written by the agent (reporter.py) in whatever directory it runs from.
+status.json

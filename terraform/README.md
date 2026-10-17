@@ -53,7 +53,27 @@ Open **Load test**, enter the memory your app needs, and start it. A peak test
 holds one level; a variable test ramps, waves or bursts between two. The four
 are asked at the same moment, in parallel, because staggered starts would pull
 the curves apart for a reason that has nothing to do with instance size. When it
-finishes, the panel names the smallest size that stayed healthy.
+finishes, the panel says which size to choose and what it costs a month.
+
+## Or all of it in one command
+
+`rightsize.sh` builds the fleet, waits for every size to report, runs the test,
+prints the verdict, saves the full report to `../rightsize-<date>.json`, and
+destroys the fleet, including when the test fails or you press Ctrl-C:
+
+```bash
+./rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+./rightsize.sh --peak 1600 --for 120 --types "t3.small t3a.medium m7i.large"
+```
+
+It needs the same credentials and `terraform.tfvars` (`key_name`) as above. It
+says what it will create and roughly what that costs an hour, and asks before
+going ahead (`--yes` skips the question). It works in its own Terraform
+workspace, `rightsize`, with resource names starting `syshealth-rs`, so it never
+touches a fleet you built with `terraform apply`. It opens the security group to
+this machine's current address only. `--keep` leaves the fleet up afterwards.
+The exit status is `cli.py`'s: 0 when a size was recommended, 2 when none fits,
+3 when `--expect TYPE` named another size.
 
 ## Costs
 

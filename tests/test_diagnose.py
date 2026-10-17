@@ -142,34 +142,48 @@ class ProcessTest(unittest.TestCase):
 
 class UsageRuleTest(unittest.TestCase):
 
-    def row(self, host, itype, hourly, used, some, killed=False):
+    def row(self, host, itype, hourly, used, cap_mb, fit="fits", kind="estimate", killed=False):
+        level = {"mb": 1000, "some": 0, "full": 0, "killed": killed, "used_pct": used}
         return {"hostname": host, "instance_type": itype, "mem_total_mb": 1,
                 "price": {"usd_hour": hourly, "usd_month": round(hourly * 730, 2)},
-                "levels": [{"mb": 1000, "some": some, "full": 0, "killed": killed, "used_pct": used}],
-                "used_at_need": 100.0 if killed else used, "killed": killed}
+                "levels": [level], "capacity": {"mb": cap_mb, "kind": kind}, "fit": fit,
+                "spare_pct": None, "used_at_need": rightsize.used_at({"levels": [level]}, 1000)}
 
     def test_agrees(self):
-        rows = [self.row("a", "t3.small", 0.0208, 90, 12), self.row("b", "t3.medium", 0.0416, 40, 0.1)]
-        rule = rightsize.usage_rule(rows, 1000, "b")
-        self.assertTrue(rule["agrees"])
+        rows = [self.row("a", "t3.small", 0.0208, 90, 800, "too_small"),
+                self.row("b", "t3.medium", 0.0416, 40, 3000)]
+        self.assertTrue(rightsize.usage_rule(rows, 1000, "b")["agrees"])
 
     def test_over_buys_when_full_but_not_waiting(self):
-        rows = [self.row("a", "t3.small", 0.0208, 88, 0.3), self.row("b", "t3.medium", 0.0416, 40, 0.1)]
+        rows = [self.row("a", "t3.small", 0.0208, 88, 1500),
+                self.row("b", "t3.medium", 0.0416, 40, 3000)]
         rule = rightsize.usage_rule(rows, 1000, "a")
         self.assertFalse(rule["agrees"])
         self.assertEqual(rule["pick"], "b")
         self.assertIn("$15.18 a month more", rule["text"])
         self.assertIn("88% in use", rule["text"])
+        self.assertIn("holds about 1.5 GB", rule["text"])
 
     def test_under_buys_when_roomy_but_waiting(self):
-        rows = [self.row("a", "t3.small", 0.0208, 35, 14), self.row("b", "t3.medium", 0.0416, 20, 0.1)]
+        rows = [self.row("a", "t3.small", 0.0208, 35, 700, "too_small"),
+                self.row("b", "t3.medium", 0.0416, 20, 3000)]
         rule = rightsize.usage_rule(rows, 1000, "b")
         self.assertEqual(rule["pick"], "a")
-        self.assertIn("waited for memory 14.0% of the time", rule["text"])
+        self.assertIn("slows down from about 700 MB, short of your app's 1000 MB", rule["text"])
 
-    def test_a_kill_at_the_need_counts_as_full(self):
-        row = self.row("a", "t3.micro", 0.0104, 30, 2, killed=True)
-        self.assertEqual(rightsize.used_at(row, 1000), 100.0)
+    def test_in_use_is_interpolated_between_levels(self):
+        row = {"levels": [{"mb": 200, "killed": False, "used_pct": 40.0},
+                          {"mb": 1200, "killed": True, "used_pct": 50.0}]}
+        # Half way from 200 MB to a level that ran out of memory: 70%.
+        self.assertEqual(rightsize.used_at(row, 700), 70.0)
+
+    def test_outside_the_levels_only_when_certain(self):
+        low = {"levels": [{"mb": 200, "killed": False, "used_pct": 40.0}]}
+        self.assertIsNone(rightsize.used_at(low, 1000))      # might be anything at 1000
+        full = {"levels": [{"mb": 200, "killed": False, "used_pct": 85.0}]}
+        self.assertEqual(rightsize.used_at(full, 1000), 85.0)  # already over at 200
+        roomy = {"levels": [{"mb": 2000, "killed": False, "used_pct": 30.0}]}
+        self.assertEqual(rightsize.used_at(roomy, 1000), 30.0)  # still under at 2000
 
 
 if __name__ == "__main__":

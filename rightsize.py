@@ -410,22 +410,31 @@ def recommend(rows, need_mb, margin_pct):
     return out
 
 
-def at_need(row, need_mb):
-    """The load level that stands for the app's need: the highest at or below
-    it, so a size is judged on the load it would really carry."""
-    below = [lv for lv in row["levels"] if lv["mb"] <= need_mb]
-    return max(below, key=lambda lv: lv["mb"]) if below else None
-
-
 def used_at(row, need_mb):
-    """Memory in use at the app's need, as most dashboards count it. A level
-    where the kernel killed the test ran out of memory: 100%."""
-    level = at_need(row, need_mb)
-    if level is None:
-        return None
-    if level["killed"]:
-        return 100.0
-    return level.get("used_pct")
+    """Memory in use while holding the app's need, as most dashboards count it.
+
+    Interpolated between the load levels either side: memory in use grows in
+    step with the memory held, unlike the waiting. A level where the kernel
+    killed the test ran out of memory, so it counts as 100%. When the need is
+    outside the levels tested, the answer is given only where it is certain
+    either way: a level below the need already over the alarm line, or one
+    above it still under.
+    """
+    points = sorted((lv["mb"], 100.0 if lv["killed"] else lv.get("used_pct"))
+                    for lv in row["levels"])
+    points = [(m, u) for m, u in points if u is not None]
+    below = [p for p in points if p[0] <= need_mb]
+    above = [p for p in points if p[0] >= need_mb]
+    if below and above:
+        (m0, u0), (m1, u1) = below[-1], above[0]
+        if m1 == m0:
+            return round(u0, 1)
+        return round(min(100.0, u0 + (u1 - u0) * (need_mb - m0) / float(m1 - m0)), 1)
+    if below and below[-1][1] >= USAGE_ALARM_PCT:
+        return below[-1][1]
+    if above and above[0][1] < USAGE_ALARM_PCT:
+        return above[0][1]
+    return None
 
 
 def usage_rule(rows, need_mb, pick):
@@ -435,49 +444,58 @@ def usage_rule(rows, need_mb, pick):
     they differ, the difference is the case for measuring waiting, not use.
     """
     judged = [r for r in rows if r.get("used_at_need") is not None]
-    ours = next((r for r in judged if r["hostname"] == pick), None)
-    if not ours:
+    ours = next((r for r in rows if r["hostname"] == pick), None)
+    if not ours or not judged:
         return None
 
     def cost(row):
         return (_month(row) if _month(row) is not None else float("inf"),
                 row.get("mem_total_mb") or float("inf"))
 
-    def waited(row):
-        level = at_need(row, need_mb)
-        return "%.1f%%" % level["some"] if level["some"] >= 1 else "under 1%"
+    def in_use(row):
+        return "%d%% in use" % int(round(row["used_at_need"]))
 
     rule = "a usage alarm (memory over %d%% in use)" % USAGE_ALARM_PCT
+    need_s = loadtest.format_mb(need_mb)
     passing = sorted((r for r in judged if r["used_at_need"] < USAGE_ALARM_PCT), key=cost)
     if not passing:
         return {"pick": None, "agrees": False,
                 "text": "Judged by memory in use, every size tested would trip %s at your app's "
-                        "peak, including %s, whose programs waited for memory %s of the time."
-                        % (rule, ours["instance_type"], waited(ours))}
+                        "peak, %s included, though it holds %s before slowing down."
+                        % (rule, ours["instance_type"], _cap_words(ours["capacity"]))}
     theirs = passing[0]
     if theirs["hostname"] == pick:
         return {"pick": pick, "agrees": True,
-                "text": "Judged by memory in use, %s would pick the same size: %s is %d%% in "
-                        "use at your app's peak." % (rule, ours["instance_type"],
-                                                     int(round(ours["used_at_need"])))}
+                "text": "Judged by memory in use, %s would pick the same size: %s is %s at "
+                        "your app's peak." % (rule, ours["instance_type"], in_use(ours))}
 
     diff = None
     if _month(theirs) is not None and _month(ours) is not None:
         diff = _exact_month(theirs) - _exact_month(ours)
     if cost(theirs) > cost(ours):
-        # The rule over-buys: ours looks full, but nothing is waiting.
-        text = ("Judged by memory in use, %s would pick %s instead%s: %s is %d%% in use at your "
-                "app's peak, yet its programs waited for memory %s of the time."
-                % (rule, theirs["instance_type"],
-                   ", %s a month more" % _money(diff) if diff else "",
-                   ours["instance_type"], int(round(ours["used_at_need"])), waited(ours)))
+        # The rule over-buys: ours looks full, but nothing is waiting yet.
+        if ours.get("used_at_need") is not None:
+            looks = "%s would be %s at your app's peak" % (ours["instance_type"], in_use(ours))
+        else:
+            looks = "%s looks too full by that rule" % ours["instance_type"]
+        text = ("Judged by memory in use, %s would pick %s instead%s: %s, yet it holds %s "
+                "before your app slows down." % (
+                    rule, theirs["instance_type"],
+                    ", %s a month more" % _money(diff) if diff else "",
+                    looks, _cap_words(ours["capacity"])))
     else:
-        # The rule under-buys: theirs looks roomy, but programs are waiting.
-        text = ("Judged by memory in use, %s would pick %s%s, but at your app's peak its "
-                "programs waited for memory %s of the time, with only %d%% in use."
+        # The rule under-buys: theirs looks roomy, but programs would wait.
+        tcap = theirs["capacity"]
+        if theirs["fit"] == "tight":
+            why = "it leaves only %d%% spare" % theirs["spare_pct"]
+        elif tcap and tcap["kind"] == "estimate":
+            why = "it slows down from %s, short of your app's %s" % (_cap_words(tcap), need_s)
+        else:
+            why = "the test did not show it holding your app"
+        text = ("Judged by memory in use, %s would pick %s%s, at %s with your app's peak, but %s."
                 % (rule, theirs["instance_type"],
                    ", %s a month less" % _money(-diff) if diff else "",
-                   waited(theirs), int(round(theirs["used_at_need"]))))
+                   in_use(theirs), why))
     return {"pick": theirs["hostname"], "agrees": False, "text": text}
 
 
