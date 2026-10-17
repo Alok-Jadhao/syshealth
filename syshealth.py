@@ -275,6 +275,8 @@ def main():
                 "timestamp": time.time(),
                 "psi": data['psi'],
                 "psi_full": data['psi_full'],
+                # CPU and disk I/O pressure, as context; states go by memory.
+                "pressure": data['pressure'],
                 **result,
                 # What the dashboard groups, orders and colours machines by.
                 "instance_type": identity["instance_type"],

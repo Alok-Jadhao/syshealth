@@ -23,6 +23,10 @@ monitor cannot, because a monitor only observes:
 | Which size to buy, and what it costs | No | Yes: the cheapest size that fits, priced, with what the others would cost |
 | Why a machine is under pressure | Raw counters; you work it out | The likely cause in words (swapping, programs filling RAM, files re-read from disk), who holds the memory, and any process that only grows |
 | Compares itself with a usage alarm | No | Yes: what "alarm at 80% in use" would have bought instead, and why it would be wrong when it is |
+
+They also work together: SysHealth serves everything it knows in Prometheus's
+format at `GET /metrics`, the states, the cause data and the last test's verdict
+included ([below](#with-prometheus)).
 | Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
 
 ---
@@ -271,6 +275,7 @@ reported as each machine's idle reference, but states no longer depend on it.
 |---|---|---|
 | GET | `/` | Live dashboard |
 | POST | `/metrics` | Agent metric push |
+| GET | `/metrics` | Everything above for Prometheus to scrape ([below](#with-prometheus)) |
 | GET | `/instances` | All instances with online status and latest metrics |
 | GET | `/instances/<hostname>/history` | Last 60 samples for one instance |
 | GET | `/series` | Every instance's recent history — what the graph reads |
@@ -390,9 +395,43 @@ whose memory has only grown for five minutes or more, by 100 MB and 20% at
 least, is called out with the time until the machine would run out at that
 rate. The load test's own `stress` is never counted.
 
-No swap is the default on EC2, so on a stock instance the second row is the
-usual one: programs fill RAM, and the kernel keeps dropping and re-reading the
-files they run from.
+Stock EC2 images have no swap, so there the second row is the usual one:
+programs fill RAM, and the kernel keeps dropping and re-reading the files they
+run from. This project's Terraform gives each agent 512 MB of swap
+(`swap_mb`), so on its fleet the first row appears too once that fills.
+
+Each agent also reports CPU and disk I/O pressure, shown beside the memory
+breakdown. States go by memory alone; the other two are context, for example
+when re-reading files from disk costs more in I/O waits than it shows as
+memory pressure.
+
+---
+
+## With Prometheus
+
+The server answers `GET /metrics` in Prometheus's text format (agents keep
+`POST`ing to the same path). Point a scrape job at it:
+
+```yaml
+scrape_configs:
+  - job_name: syshealth
+    static_configs:
+      - targets: ["YOUR_SERVER_IP:5000"]
+```
+
+| Metric | What it is |
+|---|---|
+| `syshealth_memory_waiting_ratio`, `_minute_ratio`, `syshealth_memory_stalled_ratio` | PSI `some` (10 s and the minute states are judged on) and `full`, as 0–1 |
+| `syshealth_state{state=…}` | 1 for the state each machine is in |
+| `syshealth_threshold_ratio{line=…}` | Where each state begins, so alerts can use the same lines |
+| `syshealth_cpu_waiting_ratio`, `syshealth_io_waiting_ratio`, `syshealth_io_stalled_ratio` | CPU and disk I/O pressure |
+| `syshealth_memory_bytes{part=…}`, `syshealth_memory_in_use_ratio`, `syshealth_swap_used_bytes` | Where the RAM is |
+| `syshealth_load_test_bytes` | The memory a running test asks for, 0 when none runs |
+| `syshealth_capacity_bytes{kind=…}`, `syshealth_recommended`, `syshealth_price_usd_per_hour`, `syshealth_app_need_bytes` | The last finished test's verdict, per size |
+
+Every series carries `hostname`, `instance_type`, `instance_id` and `region`.
+Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and
+"stalled" are PSI's `some` and `full`, as in node_exporter.
 
 ---
 
@@ -407,6 +446,7 @@ syshealth/
 ├── loadtest.py        # Load-test plans: built from the form, checked by the agent
 ├── rightsize.py       # What a test says each size holds, and which size to buy
 ├── diagnose.py        # Where the memory is, the likely cause, growing processes
+├── prometheus.py      # GET /metrics in Prometheus's text format
 ├── pricing.py         # What each size costs, from data/prices.json
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging

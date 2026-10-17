@@ -183,7 +183,8 @@
         ? raw.memory
         : null,
       // Only the newest sample of each instance carries it (server.py).
-      diagnosis: raw.diagnosis && typeof raw.diagnosis === 'object' ? raw.diagnosis : null
+      diagnosis: raw.diagnosis && typeof raw.diagnosis === 'object' ? raw.diagnosis : null,
+      pressure: raw.pressure && typeof raw.pressure === 'object' ? raw.pressure : null
     };
   }
 
@@ -1528,6 +1529,14 @@
     var swap = memory.swap_total_mb
       ? formatMb(memory.swap_used_mb) + ' of ' + formatMb(memory.swap_total_mb) + ' swap in use.'
       : 'No swap.';
+    // CPU and disk pressure, for context: states go by memory alone, but a
+    // box re-reading files from disk can show it more in I/O waits.
+    var other = latest.pressure;
+    $('#why-other').hidden = !other;
+    if (other) {
+      $('#why-other').textContent = 'Also waiting: for CPU ' + formatPct(num(other.cpu)) +
+        '% of the time, for disk I/O ' + formatPct(num(other.io)) + '%.';
+    }
     $('#why-usage').textContent = formatPct(memory.used_pct) + '% in use, the figure most ' +
       'dashboards alarm on. SysHealth goes by time spent waiting instead: a machine can be ' +
       'nearly full and not slowed at all. ' + swap;

@@ -29,7 +29,7 @@ ENDSSH
 
 deploy_server() {
   echo ">> Deploying server files..."
-  $SCP server.py instance.py loadtest.py rightsize.py pricing.py analyzer.py ubuntu@$SERVER:~/
+  $SCP server.py instance.py loadtest.py rightsize.py pricing.py prometheus.py analyzer.py ubuntu@$SERVER:~/
   $SSH ubuntu@$SERVER 'mkdir -p ~/templates ~/static/js ~/static/css ~/data'
   $SCP data/prices.json ubuntu@$SERVER:~/data/prices.json
   $SCP templates/index.html ubuntu@$SERVER:~/templates/index.html

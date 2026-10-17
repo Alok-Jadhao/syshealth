@@ -104,6 +104,8 @@ BASE_PROCESSES = [("python3 syshealth.py", 31), ("snapd", 24), ("amazon-ssm-agen
 APP_PROCESS = "node server.js"
 KERNEL_MB = 110        # slab, page tables and the rest of the kernel's own use
 IDLE_CACHE_SHARE = 0.4  # file cache on an idle box, as a share of RAM
+MIN_CACHE_MB = 60      # the kernel keeps this much cache before it swaps
+SWAP_MB = 512          # what terraform/ gives each agent (swap_mb)
 
 # On a real t3.micro the OOM killer ends a stress run that does not fit. Past
 # this multiple of free memory, the simulated one is killed too.
@@ -132,6 +134,9 @@ class FakeMachine:
         self.pgsteal = 900 * (index + 1)
         self.refaults = 5000 * (index + 1)
         self.majfaults = 3000 * (index + 1)
+        self.swapins = 0
+        self.swapouts = 0
+        self.swapped_mb = 0
         self.rng = random.Random(1234 + index)
         self.diagnoser = Diagnoser()
 
@@ -212,12 +217,15 @@ class FakeMachine:
     def memory_for(self, demand_mb, held_by):
         """Synthetic /proc/meminfo (kB) and top processes for holding `demand_mb`.
 
-        No swap, as on a stock EC2 instance: once programs fill RAM, the cache
-        is squeezed to almost nothing and the kernel has nowhere else to go.
+        Programs squeeze the file cache first; once it is down to the little
+        the kernel keeps, what does not fit goes to swap, 512 MB of it as on
+        the Terraform fleet.
         """
         total = self.mem_total_mb
         base = sum(rss for _, rss in BASE_PROCESSES)
-        programs = min(base + demand_mb, total - KERNEL_MB - 30)
+        room = total - KERNEL_MB - MIN_CACHE_MB
+        swapped = min(SWAP_MB, max(0, base + demand_mb - room))
+        programs = min(base + demand_mb, room)
         free_floor = int(total * 0.03)
         cache = max(25, min(int(total * IDLE_CACHE_SHARE), total - programs - KERNEL_MB - free_floor))
         free = max(10, total - programs - KERNEL_MB - cache)
@@ -226,8 +234,10 @@ class FakeMachine:
             "MemTotal": total * kb, "MemFree": free * kb,
             "MemAvailable": int((free + cache * 0.9) * kb),
             "Buffers": 8 * kb, "Cached": (cache - 8 + 2) * kb, "Shmem": 2 * kb,
-            "AnonPages": programs * kb, "SwapTotal": 0, "SwapFree": 0,
+            "AnonPages": programs * kb,
+            "SwapTotal": SWAP_MB * kb, "SwapFree": (SWAP_MB - swapped) * kb,
         }
+        self.swapped_mb = swapped
         top = [{"pid": 900 + i, "name": name, "rss_mb": rss}
                for i, (name, rss) in enumerate(BASE_PROCESSES)]
         held = min(demand_mb, programs - base)
@@ -289,12 +299,24 @@ class FakeMachine:
         self.pgsteal += int(scans * self.rng.uniform(0.55, 0.85))
         # With no swap, the pages the kernel can drop are file pages, so the
         # stall shows up as files read back from disk: about 1.6 MB/s at 10%.
+        meminfo, top = self.memory_for(demand, held_by)
         self.refaults += int(some * TICK_SEC * self.rng.uniform(30, 50))
         self.majfaults += int(some * TICK_SEC * self.rng.uniform(5, 12))
+        # Once programs have spilled into swap, part of the stall is reading
+        # them back: about 2.5 MB/s at 20%.
+        if self.swapped_mb:
+            self.swapins += int(some * TICK_SEC * self.rng.uniform(25, 40))
+            self.swapouts += int(some * TICK_SEC * self.rng.uniform(25, 40))
         vmstat = {"pgscan_direct": self.pgscan, "pgsteal_direct": self.pgsteal,
                   "workingset_refault_anon": 0, "workingset_refault_file": self.refaults,
-                  "pgmajfault": self.majfaults, "pswpin": 0, "pswpout": 0}
-        meminfo, top = self.memory_for(demand, held_by)
+                  "pgmajfault": self.majfaults, "pswpin": self.swapins, "pswpout": self.swapouts}
+        # Reading pages back is disk I/O, so I/O pressure follows the stall;
+        # CPU barely notices memory pressure.
+        other_pressure = {
+            "cpu": round(self.rng.uniform(0.2, 1.5) + some * 0.05, 2),
+            "io": round(min(some * self.rng.uniform(0.5, 0.8), 95.0), 2),
+            "io_full": round(min(full * self.rng.uniform(0.6, 0.9), 90.0), 2),
+        }
 
         # Two decimal places, because that is all /proc/pressure/memory gives
         # the real collector.
@@ -310,6 +332,7 @@ class FakeMachine:
             "timestamp": ts,
             "psi": some,
             "psi_full": full,
+            "pressure": other_pressure,
             "instance_type": self.instance_type,
             "instance_id": self.instance_id,
             "region": REGION,

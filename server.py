@@ -9,6 +9,7 @@ from flask import Flask, request, jsonify, render_template
 
 import instance
 import loadtest
+import prometheus
 import rightsize
 
 app = Flask(__name__)
@@ -71,6 +72,14 @@ def receive_metrics():
         inst["instance_id"] = data["instance_id"]
 
     return jsonify({"status": "received"}), 200
+
+
+@app.route("/metrics", methods=["GET"])
+def prometheus_metrics():
+    """The same data for Prometheus to scrape (agents POST to this path)."""
+    snap = snapshot()
+    body = prometheus.render(snap, rightsize.report(snap, plans=tests))
+    return body, 200, {"Content-Type": "text/plain; version=0.0.4; charset=utf-8"}
 
 
 def by_size(entry):

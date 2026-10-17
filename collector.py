@@ -17,6 +17,7 @@ class Collector:
         return {
             'psi': some,
             'psi_full': full,
+            'pressure': self.read_other_pressure(),
             'vmstat': self.read_vmstat(),
             'meminfo': self.read_meminfo(),
             'top': diagnose.top_processes(),
@@ -43,6 +44,28 @@ class Collector:
         except (FileNotFoundError, IndexError, ValueError):
             pass
         return values['some'], values['full']
+
+    def read_other_pressure(self):
+        """CPU and disk I/O pressure, avg10, for context beside memory.
+
+        Memory is what the states are judged on. These say whether the box is
+        also short of CPU, or whether re-reading files from disk is costing
+        more in I/O waits than it shows as memory pressure. CPU `full` is left
+        out: at the level of a whole machine it is not meaningful.
+        """
+        out = {}
+        for resource, path in (('cpu', '/proc/pressure/cpu'), ('io', '/proc/pressure/io')):
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        parts = line.split()
+                        if parts and parts[0] in ('some', 'full'):
+                            key = resource if parts[0] == 'some' else resource + '_full'
+                            if key != 'cpu_full':
+                                out[key] = float(parts[1].split('=')[1])
+            except (FileNotFoundError, IndexError, ValueError):
+                pass
+        return out
 
     def read_mem_total_mb(self):
         """Installed RAM as the kernel sees it, so the dashboard can say how a
