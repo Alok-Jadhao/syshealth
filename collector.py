@@ -1,4 +1,5 @@
 import os
+import time
 
 import diagnose
 
@@ -141,21 +142,43 @@ class AppCgroup:
     says whether *your app* is waiting. With a memory limit (a container's,
     or systemd's MemoryMax) it also says how close the app runs to it, and
     how often the kernel has killed something inside it for going over.
+
+    Its CPU too, in vCPUs kept busy (cpu.stat, present whether or not the cpu
+    controller is on): the figure a burstable size's CPU credits are judged by.
     """
 
     def __init__(self, spec, root=CGROUP_ROOT):
         self.spec = spec
         self.path = resolve_cgroup(spec, root)
         self.name = spec.strip().rstrip('/').split('/')[-1] if spec else None
+        self._cpu = None  # (usage_usec, seconds) at the last read
+
+    def _cpu_vcpu(self, now):
+        """vCPUs the app kept busy since the last read, or None the first time."""
+        usage = None
+        try:
+            for line in self._read('cpu.stat').splitlines():
+                key, _, value = line.partition(' ')
+                if key == 'usage_usec':
+                    usage = int(value)
+        except (OSError, ValueError):
+            return None
+        if usage is None:
+            return None
+        last, self._cpu = self._cpu, (usage, now)
+        # A restarted app starts a new count: skip that interval.
+        if not last or now <= last[1] or usage < last[0]:
+            return None
+        return round((usage - last[0]) / 1e6 / (now - last[1]), 3)
 
     def _read(self, name):
         with open(os.path.join(self.path, name), 'r') as f:
             return f.read()
 
-    def read(self):
+    def read(self, now=None):
         if not self.path:
             return None
-        out = {'name': self.name}
+        out = {'name': self.name, 'cpu_vcpu': self._cpu_vcpu(time.monotonic() if now is None else now)}
         try:
             for line in self._read('memory.pressure').splitlines():
                 parts = line.split()
@@ -175,5 +198,6 @@ class AppCgroup:
         except (OSError, ValueError, IndexError):
             # The app stopped, or the unit was restarted into a new group.
             self.path = resolve_cgroup(self.spec)
+            self._cpu = None
             return None
         return out

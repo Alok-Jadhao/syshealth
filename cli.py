@@ -4,12 +4,13 @@
     python3 cli.py status
     python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
     python3 cli.py run --peak 1600 --for 120 --expect t3.medium
-    python3 cli.py report --need 1200 --margin 30
+    python3 cli.py report --need 1200 --margin 30 --cpu 0.5
     python3 cli.py wait --count 4
 
 The server is $SYSHEALTH_URL, or --server, or http://127.0.0.1:5000 (which is
-also where `npm run dev` puts the demo). Only the standard library is used,
-so this runs anywhere Python 3 does.
+also where `npm run dev` puts the demo). A server with a token wants it in
+$SYSHEALTH_TOKEN: an environment variable, so it stays out of shell history.
+Only the standard library is used, so this runs anywhere Python 3 does.
 
 `run` exits 0 when a size was recommended, 2 when none fits or the test fell
 short of the app's need, 3 when --expect named a different size, and 1 on any
@@ -90,6 +91,20 @@ def spare_text(row):
             "too_small": "too small"}.get(fit, "not reached")
 
 
+def cpu_text(cpu):
+    if not cpu or cpu.get("fits") is None:
+        return "-"
+    if cpu["fits"] is False:
+        return "too little"
+    return "+$%.2f credits" % cpu["extra_usd_month"] if cpu["extra_usd_month"] else "ok"
+
+
+def month_text(row):
+    if not row.get("price"):
+        return "-"
+    return "$%.2f" % (row["price"]["usd_month"] + ((row.get("cpu") or {}).get("extra_usd_month") or 0))
+
+
 def print_report(report, out=sys.stdout):
     if not report.get("test_id"):
         print("No load test has been run on this server yet.", file=out)
@@ -97,18 +112,22 @@ def print_report(report, out=sys.stdout):
     if report.get("error"):
         print(report["error"], file=out)
         return
-    print("%s  ·  your app: %s, keeping %d%% spare" % (
-        report["summary"], mb(report.get("need_mb")), report.get("margin_pct", 0)), file=out)
+    print("%s  ·  your app: %s%s, keeping %d%% spare" % (
+        report["summary"], mb(report.get("need_mb")),
+        " and %g vCPU on average" % report["cpu_vcpu"] if report.get("cpu_vcpu") else "",
+        report.get("margin_pct", 0)), file=out)
     print(file=out)
     rec = report.get("recommendation") or {}
-    rows = [("", "SIZE", "HOLDS UP TO", "SPARE", "PER MONTH", "OUTCOME")]
+    cpu = report.get("cpu_vcpu")
+    rows = [("", "SIZE", "HOLDS UP TO", "SPARE") + (("CPU",) if cpu else ()) + ("PER MONTH", "OUTCOME")]
     for row in report["rows"]:
         rows.append((
             "*" if row["hostname"] == rec.get("pick") else "",
             row["instance_type"] if row["instance_type"] != "unknown" else row["hostname"],
             capacity_text(row.get("capacity")),
             spare_text(row),
-            "$%.2f" % row["price"]["usd_month"] if row.get("price") else "-",
+        ) + ((cpu_text(row.get("cpu")),) if cpu else ()) + (
+            month_text(row),
             row["outcome"]["text"],
         ))
     widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
@@ -168,6 +187,8 @@ def report_query(args, test_id=None):
         params["need_mb"] = args.need
     if args.margin is not None:
         params["margin"] = args.margin
+    if getattr(args, "cpu", None):
+        params["cpu"] = args.cpu
     return "/report" + ("?" + urllib.parse.urlencode(params) if params else "")
 
 
@@ -295,6 +316,8 @@ def main(argv=None):
     def verdict_options(p):
         p.add_argument("--need", type=int, help="your app's memory at its busiest, MB")
         p.add_argument("--margin", type=int, help="%% to keep spare above that (default 25)")
+        p.add_argument("--cpu", type=float, metavar="VCPUS",
+                       help="your app's average CPU in vCPUs (0.5 = half of one); prices in CPU credits")
         p.add_argument("--json", action="store_true", help="print the full report as JSON")
         p.add_argument("--save", metavar="FILE", help="also write the full report to FILE")
         p.add_argument("--expect", metavar="TYPE", help="exit 3 unless TYPE is recommended")

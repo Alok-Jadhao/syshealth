@@ -225,7 +225,28 @@ class AppTest(unittest.TestCase):
             self.make_group(root, "system.slice/myapp.service", limit=512, oom=2)
             app = collector.AppCgroup("myapp", root).read()
         self.assertEqual(app, {"name": "myapp", "psi": 12.5, "psi_full": 3.0, "current_mb": 480,
-                               "limit_mb": 512, "anon_mb": 400, "file_mb": 80, "oom_kills": 2})
+                               "limit_mb": 512, "anon_mb": 400, "file_mb": 80, "oom_kills": 2,
+                               "cpu_vcpu": None})
+
+    def test_cpu_in_vcpus_from_cpu_stat(self):
+        import collector
+        with tempfile.TemporaryDirectory() as root:
+            path = self.make_group(root, "system.slice/myapp.service")
+            stat = os.path.join(path, "cpu.stat")
+
+            def used(seconds):
+                with open(stat, "w") as f:
+                    f.write("usage_usec %d\nuser_usec 0\nsystem_usec 0\n" % (seconds * 1000000))
+
+            app = collector.AppCgroup("myapp", root)
+            used(100)
+            self.assertIsNone(app.read(now=1000.0)["cpu_vcpu"])     # nothing to compare yet
+            used(103)
+            self.assertEqual(app.read(now=1005.0)["cpu_vcpu"], 0.6)  # 3 s of CPU in 5 s
+            used(1)
+            self.assertIsNone(app.read(now=1010.0)["cpu_vcpu"])     # restarted: count began again
+            used(11)
+            self.assertEqual(app.read(now=1015.0)["cpu_vcpu"], 2.0)
 
     def test_no_group_reads_nothing(self):
         import collector

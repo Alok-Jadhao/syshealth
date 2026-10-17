@@ -247,6 +247,8 @@ class FakeMachine:
             "anon_mb": int(current * 0.9),
             "file_mb": int(current * 0.1),
             "oom_kills": 0,
+            # Busier when it holds more: ~0.1 vCPU idle, ~0.45 in the mild spell.
+            "cpu_vcpu": round((0.12 + demand / 2000.0) * self.rng.uniform(0.85, 1.15), 3),
         }
 
     def memory_for(self, demand_mb, held_by):

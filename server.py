@@ -211,16 +211,32 @@ def test_report():
     """What the last load test (or ?test_id=) says about each size.
 
     ?need_mb= is the app's memory at its busiest (default: the test's peak),
-    ?margin= the share to keep spare on top, in % (default 25).
+    ?margin= the share to keep spare on top, in % (default 25), and ?cpu= the
+    app's average CPU in vCPUs (optional; 0.5 is half of one vCPU).
     """
     try:
         need = _arg_int("need_mb", 1, loadtest.LIMITS["max_mb"], "Your app's memory")
         margin = _arg_int("margin", 0, rightsize.MAX_MARGIN_PCT, "Room to spare")
+        cpu = _arg_cpu()
     except loadtest.PlanError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify(rightsize.report(
         snapshot(), request.args.get("test_id") or None,
-        need_mb=need, margin_pct=margin, plans=tests))
+        need_mb=need, margin_pct=margin, plans=tests, cpu_vcpu=cpu))
+
+
+def _arg_cpu():
+    raw = request.args.get("cpu", "").strip()
+    if not raw:
+        return None
+    try:
+        cpu = float(raw)
+    except ValueError:
+        cpu = None
+    if cpu is None or not 0 < cpu <= rightsize.MAX_CPU_VCPU:
+        raise loadtest.PlanError("Your app's CPU must be a number of vCPUs above 0 and up to %d, "
+                                 "such as 0.5 for half of one." % rightsize.MAX_CPU_VCPU)
+    return cpu
 
 
 def _plan_from_request():

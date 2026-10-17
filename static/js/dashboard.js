@@ -1512,6 +1512,10 @@
     if (app.oom_kills) {
       note += ' Killed for going over ' + app.oom_kills + '×.';
     }
+    if (app.cpu_vcpu !== null && app.cpu_vcpu !== undefined) {
+      // What a burstable size's CPU credits are judged by.
+      note += ' CPU ' + (Math.round(num(app.cpu_vcpu) * 100) / 100) + ' vCPU.';
+    }
     $('#tile-app-note').textContent = note;
     $('#tile-app').setAttribute('data-state', bandName(num(app.psi), th));
     if (app.verdict) {
@@ -2290,13 +2294,17 @@
   var reportTimer = null;
   var reportSeq = 0;
 
-  // Only the margin is remembered: it is a policy. The app's need belongs to
-  // the test it was typed against (see needFor).
+  // The margin is remembered (a policy), and the app's CPU. The app's need
+  // belongs to the test it was typed against (see needFor).
   function loadReportPrefs() {
     try {
       var saved = JSON.parse(window.localStorage.getItem(REPORT_PREFS_KEY) || '{}');
       if (saved.margin !== undefined && saved.margin !== '') {
         $('#rs-margin').value = saved.margin;
+      }
+      // The app's CPU is the app's, not the test's: it carries over too.
+      if (saved.cpu) {
+        $('#rs-cpu').value = saved.cpu;
       }
     } catch (e) {
       /* Private window or blocked storage: the defaults will do. */
@@ -2306,7 +2314,8 @@
   function saveReportPrefs() {
     try {
       window.localStorage.setItem(REPORT_PREFS_KEY, JSON.stringify({
-        margin: $('#rs-margin').value.trim()
+        margin: $('#rs-margin').value.trim(),
+        cpu: $('#rs-cpu').value.trim()
       }));
     } catch (e) {
       /* Not worth telling anyone about. */
@@ -2331,6 +2340,10 @@
     }
     if (margin) {
       params.push('margin=' + encodeURIComponent(margin));
+    }
+    var cpu = $('#rs-cpu').value.trim();
+    if (cpu && Number(cpu) > 0) {
+      params.push('cpu=' + encodeURIComponent(cpu));
     }
     return fetch('report' + (params.length ? '?' + params.join('&') : ''), {
       headers: { Accept: 'application/json' }
@@ -2475,7 +2488,7 @@
       var spareTd = el('td', 'num', formatSpare(row));
       spareTd.setAttribute('data-fit', row.fit);
       tr.appendChild(spareTd);
-      tr.appendChild(el('td', 'num', row.price ? formatMoney(row.price.usd_month) : '—'));
+      tr.appendChild(priceCell(row));
       tr.appendChild(el('td', 'num', formatPct(row.worst_minute) + '%'));
       tr.appendChild(el('td', 'num', formatPct(row.worst_10s) + '%'));
       if (variable) {
@@ -2489,6 +2502,22 @@
       : 'No prices: the instances did not report a type and region that the price list covers.';
 
     renderCurve(report);
+  }
+
+  // The monthly price, with any CPU credits the app's average would burn.
+  function priceCell(row) {
+    var cpu = row.cpu;
+    var extra = cpu && cpu.extra_usd_month ? cpu.extra_usd_month : 0;
+    var td = el('td', 'num', row.price ? formatMoney(row.price.usd_month + extra) : '—');
+    if (cpu && cpu.fits === false) {
+      td.appendChild(el('span', 'cell-note is-bad', 'CPU too low'));
+    } else if (extra) {
+      td.appendChild(el('span', 'cell-note', 'incl. ' + formatMoney(extra) + ' CPU'));
+    }
+    if (cpu && cpu.text) {
+      td.title = cpu.text.charAt(0).toUpperCase() + cpu.text.slice(1) + '.';
+    }
+    return td;
   }
 
   // Pressure against memory held, one line per size: the capacity curve.
@@ -2772,6 +2801,10 @@
       reportSoon();
     });
     $('#rs-margin').addEventListener('input', function () {
+      saveReportPrefs();
+      reportSoon();
+    });
+    $('#rs-cpu').addEventListener('input', function () {
       saveReportPrefs();
       reportSoon();
     });

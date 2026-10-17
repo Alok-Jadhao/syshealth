@@ -163,6 +163,10 @@
                 <span class="field-label">Keep spare</span>
                 <span class="input-unit"><input type="number" id="rs-margin" value="25" min="0" max="200" step="1" inputmode="numeric"><span>%</span></span>
               </label>
+              <label class="field" title="Optional. Half of one vCPU busy around the clock is 0.5. Prices in the CPU credits a burstable size would burn.">
+                <span class="field-label">Its average CPU</span>
+                <span class="input-unit"><input type="number" id="rs-cpu" min="0" max="192" step="0.05" inputmode="decimal" placeholder="optional"><span>vCPU</span></span>
+              </label>
             </div>
           </div>
           <p class="rs-headline" id="rs-headline" aria-live="polite"></p>
@@ -206,6 +210,9 @@
           staying healthy, under the degraded line. Between two load levels it
           is estimated from the pressure at each, and the estimate errs low.
           <strong>Spare</strong> is how far that is above what your app needs.
+          With your app's average CPU, <strong>Per month</strong> adds the CPU
+          credits a burstable size would burn above its baseline; the test
+          itself loads memory, not CPU.
           <strong>Worst minute</strong> is the highest one-minute average, the
           number states are judged on; <strong>Worst 10&nbsp;s</strong> the
           sharpest spike. Load levels use the average pressure while each was

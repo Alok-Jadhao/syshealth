@@ -12,6 +12,9 @@ cheapest size that leaves enough.
                for its cache; 25% unless the person says otherwise.
     verdict    The cheapest size whose capacity covers the peak plus that
                headroom, priced from pricing.py.
+    cpu        Optional: the app's average CPU, in vCPUs. A size needs that
+               many (plus the headroom), and a burstable one is priced with
+               the CPU credits it would burn above its baseline.
 
 Everything here is computed from the samples the agents already push, so it
 works the same for a live fleet, for dev.py's simulated one, and for anyone
@@ -26,6 +29,7 @@ SETTLE_SEC = 10    # a step's first 10 s reading still carries the step before i
 TRAIL_SEC = 60     # states are judged on a minute, so they trail the load
 DEFAULT_MARGIN_PCT = 25
 MAX_MARGIN_PCT = 200
+MAX_CPU_VCPU = 192   # the most vCPUs any size in the price list has
 
 # The rule SysHealth is set against: judge a size by how much of its memory is
 # "in use" (MemTotal - MemAvailable, what `free` and most dashboards show) and
@@ -221,6 +225,58 @@ def spare_pct(cap, need_mb):
     return round((cap["mb"] - need_mb) * 100.0 / need_mb)
 
 
+def _vcpu(value):
+    return ("%.2f" % value).rstrip("0").rstrip(".") + " vCPU"
+
+
+def cpu_check(itype, cpu, margin_pct):
+    """Whether a size's CPU carries the app's average, and what that costs.
+
+    Not measured by the test, which loads memory: worked out from the size's
+    vCPUs and, for a burstable size, its CPU credits. `cpu` is the app's
+    average use in vCPUs (0.5 is half of one vCPU kept busy around the clock);
+    the margin applies as it does to memory.
+    """
+    required = cpu * (1 + margin_pct / 100.0)
+    spec = pricing.specs(itype)
+    burst = pricing.burst(itype)
+    out = {"vcpus": spec["vcpu"] if spec else None,
+           "baseline_vcpu": burst["baseline_vcpu"] if burst else None,
+           "mode": burst["mode"] if burst else None,
+           "fits": None, "extra_usd_month": 0.0, "text": ""}
+    if not spec:
+        out["text"] = "vCPUs not known for this size"
+        return out
+    if required > spec["vcpu"]:
+        out["fits"] = False
+        out["text"] = "%d vCPU%s, short of the %s your app needs with %d%% spare" % (
+            spec["vcpu"], "" if spec["vcpu"] == 1 else "s", _vcpu(required), margin_pct)
+        return out
+    out["fits"] = True
+    if not burst:
+        out["text"] = "%d vCPUs, no CPU credits to run out" % spec["vcpu"]
+        return out
+    baseline = burst["baseline_vcpu"]
+    if burst["mode"] == "standard":
+        # A t2 by default: once its saved credits run out it is held down.
+        if required > baseline:
+            out["fits"] = False
+            out["text"] = ("held to %s once its CPU credits run out (standard mode, the %s "
+                           "default), short of the %s your app needs" % (
+                               _vcpu(baseline), itype.split(".")[0], _vcpu(required)))
+        else:
+            out["text"] = "within its CPU credits (%s on average)" % _vcpu(baseline)
+        return out
+    over = max(0.0, cpu - baseline)
+    out["extra_usd_month"] = round(over * burst["usd_per_vcpu_hour"] * pricing.HOURS_PER_MONTH, 2)
+    if over > 0:
+        out["text"] = "%s above its %s baseline: about %s a month in CPU credits" % (
+            _vcpu(over), _vcpu(baseline), _money(out["extra_usd_month"]))
+    else:
+        out["text"] = "within its %s baseline: no CPU credit charges" % _vcpu(baseline)
+    return out
+
+
 def _outcome(row, running, variable):
     """The table's one-line result: how the size coped with the whole test."""
     if row["killed"]:
@@ -303,13 +359,22 @@ def _cap_words(cap):
     return "about " + loadtest.format_mb(cap["mb"])
 
 
+def _cpu_extra(row):
+    return (row.get("cpu") or {}).get("extra_usd_month") or 0.0
+
+
 def _month(row):
-    return row["price"]["usd_month"] if row.get("price") else None
+    """What the size costs a month, with any CPU credits it would burn."""
+    return round(row["price"]["usd_month"] + _cpu_extra(row), 2) if row.get("price") else None
 
 
 def _exact_month(row):
     """Unrounded, so a difference of two prices is not a cent out."""
-    return row["price"]["usd_hour"] * pricing.HOURS_PER_MONTH
+    return row["price"]["usd_hour"] * pricing.HOURS_PER_MONTH + _cpu_extra(row)
+
+
+def _cpu_ok(row):
+    return (row.get("cpu") or {}).get("fits") is not False
 
 
 def _join(names):
@@ -334,10 +399,17 @@ def recommend(rows, need_mb, margin_pct):
         return (month if month is not None else float("inf"),
                 row.get("mem_total_mb") or float("inf"))
 
-    candidates = sorted((r for r in tested if r["fit"] in preference),
+    candidates = sorted((r for r in tested if r["fit"] in preference and _cpu_ok(r)),
                         key=lambda r: (preference[r["fit"]],) + cost_key(r))
     out = {"pick": None, "headline": "", "detail": "", "lines": []}
 
+    held = [r for r in tested if r["fit"] in preference]
+    if not candidates and held:
+        # Memory is not the problem: every size that holds it lacks the CPU.
+        out["headline"] = "None of the sizes that hold your app's %s has the CPU for it" % need_s
+        out["detail"] = "; ".join("%s: %s" % (r["instance_type"], r["cpu"]["text"])
+                                  for r in sorted(held, key=cost_key)) + ". Test a bigger size."
+        return out
     if not candidates:
         short = [r for r in tested if r["fit"] == "untested"]
         if short:
@@ -364,6 +436,9 @@ def recommend(rows, need_mb, margin_pct):
     out["pick"] = pick["hostname"]
     out["headline"] = "Choose %s%s" % (
         pick["instance_type"], " · %s a month" % _money(month) if month is not None else "")
+    if _cpu_extra(pick):
+        out["lines"].append("That includes about %s a month of CPU credits: your app's average is "
+                            "above what %s earns." % (_money(_cpu_extra(pick)), pick["instance_type"]))
 
     if pick["fit"] == "fits" and cap["kind"] == "estimate":
         out["detail"] = ("It holds %s before your app slows down: %d%% more than your app's %s, "
@@ -389,7 +464,9 @@ def recommend(rows, need_mb, margin_pct):
         if cheaper:
             nearest = max(cheaper, key=_month)
             ncap = nearest["capacity"]
-            if nearest["fit"] == "tight":
+            if not _cpu_ok(nearest):
+                why = "its CPU falls short: %s" % nearest["cpu"]["text"]
+            elif nearest["fit"] == "tight":
                 why = "it leaves only %d%% spare" % nearest["spare_pct"]
             elif ncap["kind"] == "estimate":
                 why = "it holds only %s before slowing down" % _cap_words(ncap)
@@ -499,7 +576,7 @@ def usage_rule(rows, need_mb, pick):
     return {"pick": theirs["hostname"], "agrees": False, "text": text}
 
 
-def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
+def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None, cpu_vcpu=None):
     """Everything the dashboard's results panel and GET /report show."""
     test_id = test_id or latest_test_id(snapshot)
     if not test_id:
@@ -524,7 +601,9 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
     margin = DEFAULT_MARGIN_PCT if margin_pct is None else int(margin_pct)
     required = need * (1 + margin / 100.0) if need else None
 
+    cpu = float(cpu_vcpu) if cpu_vcpu else None
     for row in rows:
+        row["cpu"] = cpu_check(row["instance_type"], cpu, margin) if cpu else None
         row["fit"] = fit(row["capacity"], need, required) if need else "untested"
         row["spare_pct"] = spare_pct(row["capacity"], need)
         row["used_at_need"] = used_at(row, need) if need else None
@@ -559,6 +638,7 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
         "need_mb": need,
         "margin_pct": margin,
         "required_mb": int(round(required)) if required else None,
+        "cpu_vcpu": cpu,
         "rows": rows,
         "recommendation": verdict,
         "prices": {
@@ -567,6 +647,9 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
             "note": ("Prices from your prices file where it has them, otherwise " if own else "") +
                     "AWS on-demand list price, Linux, %s, as of %s. Discounts, savings "
                     "plans and storage are not included." % (
-                        ", ".join(regions) or "no region", pricing.fetched() or "an unknown date"),
+                        ", ".join(regions) or "no region", pricing.fetched() or "an unknown date") +
+                    (" CPU credits: AWS's unlimited-mode rate for each vCPU-hour of your "
+                     "app's average above a burstable size's baseline ($0.05 a vCPU-hour for "
+                     "t2, t3 and t3a, $0.04 for t4g); not measured by this test." if cpu else ""),
         },
     }

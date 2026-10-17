@@ -215,6 +215,67 @@ class PricingTest(unittest.TestCase):
             os.unlink(f.name)
 
 
+class CpuTest(unittest.TestCase):
+    """The app's average CPU against each size's vCPUs and CPU credits."""
+
+    def test_unlimited_sizes_pay_for_cpu_above_their_baseline(self):
+        cpu = rightsize.cpu_check("t3.micro", 0.5, 25)
+        self.assertTrue(cpu["fits"])
+        self.assertEqual(cpu["baseline_vcpu"], 0.2)
+        # (0.5 - 0.2) vCPU x $0.05 a vCPU-hour x 730 hours
+        self.assertAlmostEqual(cpu["extra_usd_month"], 10.95)
+        self.assertEqual(rightsize.cpu_check("t3.large", 0.5, 25)["extra_usd_month"], 0)
+        # t4g credits are cheaper
+        self.assertAlmostEqual(rightsize.cpu_check("t4g.micro", 0.5, 25)["extra_usd_month"], 8.76)
+
+    def test_standard_mode_holds_a_t2_to_its_baseline(self):
+        cpu = rightsize.cpu_check("t2.micro", 0.2, 25)
+        self.assertFalse(cpu["fits"])
+        self.assertIn("held to 0.1 vCPU", cpu["text"])
+        self.assertTrue(rightsize.cpu_check("t2.large", 0.4, 25)["fits"])
+
+    def test_too_few_vcpus(self):
+        self.assertFalse(rightsize.cpu_check("t3.large", 1.7, 25)["fits"])   # needs 2.125
+        self.assertTrue(rightsize.cpu_check("m7i.large", 1.5, 25)["fits"])
+        self.assertEqual(rightsize.cpu_check("m7i.large", 1.5, 25)["extra_usd_month"], 0)
+        self.assertIsNone(rightsize.cpu_check("x9.huge", 0.5, 25)["fits"])
+
+    def test_report_prices_the_credits_in(self):
+        plain = run_test(RAMP)
+        report = rightsize.report(server.snapshot(), None, 1600, 25, server.tests, cpu_vcpu=0.9)
+        self.assertEqual(report["cpu_vcpu"], 0.9)
+        rec, before = report["recommendation"], plain["recommendation"]
+        self.assertEqual(rec["pick"], before["pick"])
+        medium = rows_by_type(report)["t3.medium"]
+        self.assertAlmostEqual(medium["cpu"]["extra_usd_month"], 18.25)
+        self.assertIn("$48.62", rec["headline"])   # $30.37 + $18.25
+        self.assertTrue(any("CPU credits" in line for line in rec["lines"]))
+        self.assertIn("CPU credits", report["prices"]["note"])
+        self.assertIsNone(rows_by_type(plain)["t3.medium"]["cpu"])
+
+    def test_no_size_with_the_cpu(self):
+        run_test(RAMP)
+        report = rightsize.report(server.snapshot(), None, 1600, 25, server.tests, cpu_vcpu=1.7)
+        rec = report["recommendation"]
+        self.assertIsNone(rec["pick"])
+        self.assertIn("has the CPU", rec["headline"])
+
+    def test_a_cheaper_size_short_of_cpu_is_passed_over(self):
+        def row(itype, host):
+            return {"hostname": host, "instance_type": itype, "mem_total_mb": 4096,
+                    "capacity": {"mb": 3000, "kind": "estimate", "held_mb": 2800, "failed_mb": 3200},
+                    "fit": "fits", "spare_pct": 87, "levels": [],
+                    "price": pricing.lookup(itype, "us-east-1"),
+                    "cpu": rightsize.cpu_check(itype, 0.5, 25)}
+        rows = [row("t2.medium", "a"), row("t3.medium", "b")]
+        # $33.87 for the t2 against $30.37 + $3.65 of credits for the t3: the
+        # t2 is cheaper, but held to 0.4 vCPU once its credits run out.
+        rec = rightsize.recommend(rows, 1600, 25)
+        self.assertEqual(rec["pick"], "b")
+        self.assertTrue(any(line.startswith("t2.medium would save") and "CPU falls short" in line
+                            for line in rec["lines"]))
+
+
 class EndpointTest(unittest.TestCase):
 
     def setUp(self):
@@ -228,6 +289,9 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(body["required_mb"], 1560)
         self.assertEqual(self.client.get("/report?need_mb=abc").status_code, 400)
         self.assertEqual(self.client.get("/report?margin=500").status_code, 400)
+        for bad in ("abc", "0", "-1", "500"):
+            self.assertEqual(self.client.get("/report?cpu=" + bad).status_code, 400, bad)
+        self.assertEqual(self.client.get("/report?cpu=0.5").get_json()["cpu_vcpu"], 0.5)
 
     def test_load_plan_preview_carries_the_need(self):
         body = self.client.post("/load-plan", json=RAMP).get_json()
