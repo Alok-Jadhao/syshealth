@@ -643,7 +643,8 @@ syshealth/
 │   └── prices.json    # AWS on-demand list prices, dated (tools/update_prices.py)
 ├── tools/
 │   └── update_prices.py  # Refresh data/prices.json from AWS's public price list
-├── tests/             # python3 -m unittest discover -s tests  (or npm test)
+├── tests/             # python3 -m unittest discover -s tests  (or npm test); CI runs them
+├── requirements.txt   # flask, requests
 ├── docs/
 │   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply
@@ -655,8 +656,9 @@ syshealth/
 
 ## Requirements
 
-- Python 3.10+
-- `pip install flask requests`
+- Python 3.10+ (CI runs 3.12, Ubuntu 24.04's, and 3.14)
+- Flask and requests: `sudo apt install python3-flask python3-requests`, or
+  `pip install -r requirements.txt` in a virtualenv
 - Linux kernel ≥ 4.20 (PSI support)
 - `stress` package on agent instances (`sudo apt install stress`)
 - Node ≥ 18 only if you want `npm run dev` — `python3 dev.py` is the same thing

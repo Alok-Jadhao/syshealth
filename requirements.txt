@@ -1,0 +1,5 @@
+# The server, the agent and the tests. cli.py and mcp_server.py need only the
+# standard library. On Debian or Ubuntu, `apt install python3-flask
+# python3-requests` gives the same (what terraform/ installs on the fleet).
+flask>=3.0
+requests>=2.31
