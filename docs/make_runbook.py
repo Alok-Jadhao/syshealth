@@ -37,10 +37,11 @@ def S(name, **kw):
 
 TITLE = S("t", fontName="Helvetica-Bold", fontSize=19, leading=23, spaceAfter=2)
 SUB = S("s", fontSize=10, textColor=MUTED, spaceAfter=13)
+# keepWithNext: a heading never ends a page apart from what it heads.
 H1 = S("h1", fontName="Helvetica-Bold", fontSize=13.5, leading=17,
-       textColor=ACCENT, spaceBefore=13, spaceAfter=6)
+       textColor=ACCENT, spaceBefore=13, spaceAfter=6, keepWithNext=1)
 H2 = S("h2", fontName="Helvetica-Bold", fontSize=10.4, leading=14,
-       spaceBefore=9, spaceAfter=3)
+       spaceBefore=9, spaceAfter=3, keepWithNext=1)
 BODY = S("b")
 SMALL = S("sm", fontSize=8.5, leading=11.6, textColor=MUTED)
 BULLET = S("bu", leftIndent=11, bulletIndent=2, spaceAfter=3)
@@ -204,14 +205,27 @@ E(say("That number is the share of the last minute that programs spent waiting f
       "they come from the systems that act on this signal in production, like Android's "
       "low-memory killer, systemd-oomd and Meta's oomd. The sources are in the repo."))
 
-A(para("Step 6 — The result", H2))
-A(para("Open <b>Load test</b> again. The results under the form name the smallest size "
-       "that stayed healthy.", BODY))
-E(say("The finding is that t3.medium, at 4 gigabytes, is the smallest instance that stays "
-      "healthy under this workload. Anything smaller degrades. That is a sizing decision "
-      "made from measurement instead of guesswork. And the load is whatever your app "
-      "needs: switch to <i>Variable load</i> and it ramps up step by step, then tells you "
-      "the load at which each size started to struggle."))
+A(para("Step 6 — The result: which size to buy", H2))
+A(para("Open <b>Load test</b> again. <b>Which size to choose</b> leads the results: the "
+       "cheapest size that held the app with room to spare, its price a month, and what "
+       "the sizes either side would mean.", BODY))
+E(say("The answer is t3.medium, about 30 dollars a month. The small would save 15 dollars "
+      "but it slows down under this load, and the large costs 30 dollars more for room "
+      "this app does not use. That is a sizing decision made from measurement instead of "
+      "guesswork, and it is said in money."))
+A(para("To show how much room each size leaves, run a <b>Variable load</b> ramp up past "
+       "the app's need (say 200 to 3200 MB, six steps). The <b>Pressure at each load level</b> "
+       "chart then shows where each size gives out, and the table says how much each holds.",
+       SMALL))
+
+A(para("Step 7 — Why, and why not just watch usage", H2))
+A(para("Click <b>t3.small</b> while the test runs. Under the tiles, <b>Where the memory "
+       "is</b> splits the RAM, lists what holds it, and names the likely cause.", BODY))
+E(say("It does not just say the machine is struggling, it says why. On the small, programs "
+      "have taken nearly all the RAM, so the kernel is swapping, or throwing out and "
+      "re-reading the files they run from, and it shows the numbers. And the report checks "
+      "itself against the usual rule, an alarm at 80 percent memory in use, and says when "
+      "that rule would have bought the wrong size."))
 
 A(PageBreak())
 
@@ -234,6 +248,13 @@ ssh -i $KEY ubuntu@$MICRO \\
 A(para("Prints the kernel's own record of killing the stress job, with a timestamp that "
        "matches the spike on the chart.", SMALL))
 
+A(para("“How is this different from Prometheus and Grafana?”", H2))
+E(say("Prometheus watches. It can graph this same kernel counter, but it never applies a "
+      "load, never knows what load caused a reading, and never tells you what to buy. "
+      "SysHealth runs the same load on every size at once, works out how much each can hold "
+      "before the app slows down, and names the cheapest that fits. They work together, "
+      "too: SysHealth serves all of it, the verdict included, for Prometheus to scrape."))
+
 A(para("“Why not just watch memory usage?”", H2))
 E(say("Usage tells you a number, not whether it hurts. A box sitting at 95 percent with "
       "nothing to reclaim is fine. A box at 60 percent thrashing is not. PSI measures time "
@@ -254,10 +275,10 @@ E(say("Python and Flask. The agent reads /proc/pressure/memory and /proc/vmstat.
       "internet. The whole fleet is Terraform — one command builds all five machines."))
 
 A(para("“Could this run in production?”", H2))
-E(say("The measurement side, yes. Two things would need work first: history is kept in memory "
-      "and is lost if the server restarts, so it would need a real datastore. And the "
-      "dashboard has no authentication — right now it is locked to a single IP address, "
-      "which is fine for a demo and not for anything real."))
+E(say("The measurement side, yes, and Prometheus can scrape it today. Two things would "
+      "need work first: history is kept in memory and is lost if the server restarts, so it "
+      "would need a real datastore. And the dashboard has no authentication — right now it is "
+      "locked to a single IP address, which is fine for a demo and not for anything real."))
 
 A(PageBreak())
 
@@ -299,7 +320,10 @@ A(para("Say plainly that it is simulated. The states and thresholds still come f
 
 A(para("5 &nbsp; Afterwards", H1))
 A(para("Save the evidence before you destroy anything. History lives in the server's memory "
-       "and goes with it.", BODY))
+       "and goes with it. The verdict, as JSON:", BODY))
+E(code("""python3 ../cli.py --server "$(terraform output -raw dashboard_url)" \\
+  report --save ~/syshealth/report-$(date +%F).json"""))
+A(para("And the raw samples:", BODY))
 E(code("""curl -s "$(terraform output -raw dashboard_url)/series?limit=720" \\
   > ~/syshealth/demo-evidence-$(date +%F).json
 
