@@ -1,6 +1,8 @@
 from collections import OrderedDict, defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
+import hmac
+import os
 import time
 import uuid
 
@@ -20,6 +22,13 @@ HISTORY_LIMIT = 720
 ONLINE_WINDOW_SEC = 15
 AGENT_CONTROL_PORT = 5001
 TESTS_KEPT = 50
+
+# One shared secret for everything that changes state: agents pushing samples,
+# and anyone starting or stopping a load test. The server passes it on to the
+# agents' control ports. Unset, nothing is checked, and the network (the
+# security groups in terraform/) is the only guard.
+TOKEN = os.environ.get("SYSHEALTH_TOKEN", "").strip() or None
+GUARDED = {("POST", "receive_metrics"), ("POST", "run_stress"), ("POST", "stop_stress")}
 
 instances = defaultdict(lambda: {
     "hostname": None,
@@ -41,6 +50,22 @@ def record_test(test_id, plan):
     tests[test_id] = {"plan": plan, "started": time.time()}
     while len(tests) > TESTS_KEPT:
         tests.popitem(last=False)
+
+
+def token_ok(header):
+    """Whether an Authorization header carries this server's token."""
+    if not TOKEN:
+        return True
+    scheme, _, value = (header or "").partition(" ")
+    return scheme.lower() == "bearer" and hmac.compare_digest(value.strip().encode(), TOKEN.encode())
+
+
+@app.before_request
+def require_token():
+    if (request.method, request.endpoint) in GUARDED and not token_ok(request.headers.get("Authorization")):
+        return jsonify({"error": "This server needs its token (SYSHEALTH_TOKEN) to do that.",
+                        "token_required": True}), 401
+    return None
 
 
 @app.route("/")
@@ -238,6 +263,10 @@ def _online_targets(now, results):
     for host, inst in instances.items():
         if (now - inst["last_seen"]) > ONLINE_WINDOW_SEC:
             results[host] = "offline"
+        elif (inst["latest"] or {}).get("accepts_tests") is False:
+            # A machine that is only watched, such as the production box the
+            # app's own pressure comes from: never load it.
+            results[host] = "skipped: watch only (SYSHEALTH_CONTROL=off)"
         elif not inst.get("agent_ip"):
             results[host] = "no ip"
         else:
@@ -260,7 +289,11 @@ def _fan_out(targets, send):
 
 def _agent_post(agent_ip, path, body=None):
     try:
-        r = requests.post(f"http://{agent_ip}:{AGENT_CONTROL_PORT}{path}", json=body, timeout=4)
+        headers = {"Authorization": "Bearer " + TOKEN} if TOKEN else None
+        r = requests.post(f"http://{agent_ip}:{AGENT_CONTROL_PORT}{path}", json=body,
+                          headers=headers, timeout=4)
+        if r.status_code == 401:
+            return "rejected: the agent's SYSHEALTH_TOKEN differs from the server's"
         if r.status_code == 404 and path == "/stop":
             return "agent too old to stop a test"
         try:

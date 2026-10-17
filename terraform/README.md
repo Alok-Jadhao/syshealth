@@ -49,8 +49,14 @@ still missing:
 ./check.sh
 ```
 
-Open **Load test**, enter the memory your app needs, and start it. A peak test
-holds one level; a variable test ramps, waves or bursts between two. The four
+Open **Load test**, enter the memory your app needs, and start it. The first
+Start asks for the fleet's token, which Terraform made:
+
+```bash
+terraform output -raw token
+```
+
+A peak test holds one level; a variable test ramps, waves or bursts between two. The four
 are asked at the same moment, in parallel, because staggered starts would pull
 the curves apart for a reason that has nothing to do with instance size. When it
 finishes, the panel says which size to choose and what it costs a month.
@@ -66,8 +72,8 @@ destroys the fleet, including when the test fails or you press Ctrl-C:
 ./rightsize.sh --peak 1600 --for 120 --types "t3.small t3a.medium m7i.large"
 ```
 
-It needs the same credentials and `terraform.tfvars` (`key_name`) as above. It
-says what it will create and roughly what that costs an hour, and asks before
+It needs the same credentials and `terraform.tfvars` (`key_name`) as above, and
+hands the fleet's token to `cli.py` itself. It says what it will create and roughly what that costs an hour, and asks before
 going ahead (`--yes` skips the question). It works in its own Terraform
 workspace, `rightsize`, with resource names starting `syshealth-rs`, so it never
 touches a fleet you built with `terraform apply`. It opens the security group to
@@ -101,10 +107,17 @@ traffic on their stress control port only from the dashboard's security group,
 and the dashboard accepts metrics only from the agents' group. No IP addresses
 are written down, so nothing drifts.
 
-**`ssh_cidr` also gates the dashboard UI, and rejects `0.0.0.0/0`.** The
-dashboard has no authentication and its `/run-stress` endpoint can load every
-agent in the fleet, so anyone who can reach port 5000 can drive your instances.
-One address only.
+**A token per fleet.** `random_password.token` is handed to the server and
+every agent (`SYSHEALTH_TOKEN` in their systemd units). Agents send it with each
+push; starting or stopping a test needs it, from the dashboard, `cli.py` or the
+MCP server; and each agent's control port refuses anything without it. It
+lives in the Terraform state, which is gitignored, and in the instances' user
+data, readable from the instance itself and by anyone in the AWS account
+allowed to read instance attributes.
+
+**`ssh_cidr` also gates the dashboard UI, and rejects `0.0.0.0/0`.** The token
+guards starting a test, but anyone who can reach port 5000 can still read
+everything the fleet reports. One address only.
 
 **A 512 MiB swapfile on the agents, by default.** With no swap, a `stress` run
 on a `t3.micro` reaches the OOM killer almost at once: one spike and a dead

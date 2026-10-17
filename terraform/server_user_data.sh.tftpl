@@ -20,6 +20,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/opt/syshealth
+Environment=SYSHEALTH_TOKEN=${token}
 ExecStart=/usr/bin/python3 /opt/syshealth/server.py
 Restart=always
 RestartSec=5

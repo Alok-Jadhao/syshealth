@@ -1986,16 +1986,57 @@
 
   /* ---------- load test ---------- */
 
+  // A server with SYSHEALTH_TOKEN set starts and stops tests only for someone
+  // who has it. The field appears the first time the server asks.
+  var TOKEN_KEY = 'syshealth.token';
+
+  function savedToken() {
+    try {
+      return window.localStorage.getItem(TOKEN_KEY) || '';
+    } catch (e) {
+      return $('#lt-token').value.trim();
+    }
+  }
+
+  function wireToken() {
+    var input = $('#lt-token');
+    input.value = savedToken();
+    if (input.value) {
+      $('#lt-token-row').hidden = false;
+    }
+    input.addEventListener('input', function () {
+      try {
+        window.localStorage.setItem(TOKEN_KEY, input.value.trim());
+      } catch (e) {
+        /* Then it lives in the field until the page is closed. */
+      }
+    });
+  }
+
   function postJson(url, body) {
+    var headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
+    var token = savedToken() || $('#lt-token').value.trim();
+    if (token) {
+      headers.Authorization = 'Bearer ' + token;
+    }
     return fetch(url, {
       method: 'POST',
-      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      headers: headers,
       body: JSON.stringify(body || {})
     }).then(function (response) {
       return response.json().then(
         function (data) { return { ok: response.ok, status: response.status, data: data }; },
         function () { return { ok: false, status: response.status, data: {} }; }
-      );
+      ).then(function (result) {
+        if (result.status === 401 && result.data.token_required) {
+          $('#lt-token-row').hidden = false;
+          result.data.error = token
+            ? 'The server did not accept that token. Check it and try again.'
+            : 'This server needs its token to start or stop a test. Enter it below and try again.';
+          $('#lt-token').focus();
+        }
+        return result;
+      });
     });
   }
 
@@ -2723,6 +2764,7 @@
       previewSoon();
     });
     form.addEventListener('input', previewSoon);
+    wireToken();
 
     loadReportPrefs();
     $('#rs-need').addEventListener('input', function () {
@@ -2769,7 +2811,8 @@
             state.startedAt = null;
             state.stopped = { at: Date.now(), ids: ids, all: !known.length };
           }
-          showStatus(result.ok ? 'Stop sent:' : 'Could not stop the test.', result.data.results);
+          showStatus(result.ok ? 'Stop sent:' : (result.data.error || 'Could not stop the test.'),
+                     result.data.results);
         })
         .catch(function (err) {
           showStatus('Could not stop the test: ' + err.message);

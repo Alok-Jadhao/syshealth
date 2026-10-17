@@ -3,6 +3,12 @@ output "dashboard_url" {
   value       = "http://${aws_instance.server.public_ip}:5000"
 }
 
+output "token" {
+  description = "What the dashboard asks for before it starts a test, and what cli.py reads from SYSHEALTH_TOKEN."
+  value       = random_password.token.result
+  sensitive   = true
+}
+
 output "ami_id" {
   description = "The image these instances were built from. Read it before a destroy you intend to rebuild identically, and set it as ami_id in terraform.tfvars."
   value       = local.ami_id
@@ -66,7 +72,8 @@ output "next_steps" {
     first pushes. The Instance toggle appears once two agents are reporting.
 
     Open "Load test", enter the memory your app needs (peak, or a variable
-    ramp), and watch the smaller sizes separate from the larger ones.
+    ramp), and watch the smaller sizes separate from the larger ones. The
+    first Start asks for the token:  terraform output -raw token
 
     If a size never appears:
       ssh ubuntu@<ip> 'sudo tail -50 /var/log/syshealth-bootstrap.log'

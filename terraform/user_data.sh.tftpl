@@ -37,7 +37,8 @@ cd /opt/syshealth
 
 %{ if calibrate ~}
 # 60 seconds of idle, before any load, so each instance gets its own baseline.
-# The dashboard's 2x and 5x threshold lines are drawn from this.
+# The states use fixed thresholds (docs/thresholds.md); the baseline only
+# travels with each sample, as context.
 python3 syshealth.py calibrate
 %{ endif ~}
 
@@ -51,6 +52,7 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory=/opt/syshealth
 Environment=SYSHEALTH_SERVER_URL=${dashboard_url}
+Environment=SYSHEALTH_TOKEN=${token}
 ExecStart=/usr/bin/python3 /opt/syshealth/syshealth.py
 Restart=always
 RestartSec=5

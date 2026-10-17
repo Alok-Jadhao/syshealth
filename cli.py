@@ -27,6 +27,7 @@ import urllib.parse
 import urllib.request
 
 DEFAULT_SERVER = os.environ.get("SYSHEALTH_URL") or "http://127.0.0.1:5000"
+TOKEN = os.environ.get("SYSHEALTH_TOKEN", "").strip() or None
 POLL_SEC = 10
 SETTLE_SEC = 15     # the agents' last samples are a push or two behind
 EXIT_OK, EXIT_ERROR, EXIT_NO_FIT, EXIT_UNEXPECTED = 0, 1, 2, 3
@@ -39,9 +40,11 @@ class CliError(Exception):
 def call(server, path, body=None, method=None):
     url = server.rstrip("/") + path
     data = json.dumps(body).encode() if body is not None else None
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    if TOKEN:
+        headers["Authorization"] = "Bearer " + TOKEN
     request = urllib.request.Request(
-        url, data=data, method=method or ("POST" if body is not None else "GET"),
-        headers={"Content-Type": "application/json", "Accept": "application/json"})
+        url, data=data, method=method or ("POST" if body is not None else "GET"), headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=20) as response:
             return json.loads(response.read() or b"{}")
@@ -50,6 +53,11 @@ def call(server, path, body=None, method=None):
             detail = json.loads(exc.read() or b"{}").get("error")
         except ValueError:
             detail = None
+        finally:
+            exc.close()
+        if exc.code == 401:
+            detail = ("the server rejected $SYSHEALTH_TOKEN" if TOKEN else
+                      "the server needs its token: set SYSHEALTH_TOKEN")
         raise CliError(detail or "%s answered %d" % (url, exc.code))
     except (urllib.error.URLError, OSError) as exc:
         raise CliError("Cannot reach %s: %s" % (server, getattr(exc, "reason", exc)))

@@ -1178,6 +1178,10 @@ main {
   font-size: 11px;
 }
 
+#lt-token-row .input-unit {
+  max-width: 320px;
+}
+
 .input-unit {
   display: flex;
   align-items: center;

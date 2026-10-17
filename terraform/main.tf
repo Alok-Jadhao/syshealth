@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
@@ -41,6 +45,15 @@ locals {
     Project   = "syshealth"
     ManagedBy = "terraform"
   })
+}
+
+# The secret the server and agents share. Agents send it with every push, and
+# the dashboard, cli.py and the server need it to start or stop a load test, so
+# reaching port 5000 or 5001 is no longer enough on its own. It lives in the
+# state (gitignored); read it with `terraform output -raw token`.
+resource "random_password" "token" {
+  length  = 32
+  special = false
 }
 
 # The default VPC keeps this to one file with no NAT gateway to pay for. Server
@@ -121,8 +134,8 @@ resource "aws_vpc_security_group_ingress_rule" "server_ssh" {
   ip_protocol       = "tcp"
 }
 
-# The dashboard has no authentication and its /run-stress endpoint can load
-# every agent, so the UI is reachable from one address only.
+# /run-stress can load every agent. It needs the token too, but the UI is
+# reachable from one address only all the same.
 resource "aws_vpc_security_group_ingress_rule" "server_ui" {
   security_group_id = aws_security_group.server.id
   description       = "Dashboard UI, operator only"
@@ -193,6 +206,7 @@ resource "aws_instance" "server" {
   user_data = templatefile("${path.module}/server_user_data.sh.tftpl", {
     repo_url    = var.repo_url
     repo_branch = var.repo_branch
+    token       = random_password.token.result
   })
 
   metadata_options {
@@ -246,6 +260,7 @@ resource "aws_instance" "agent" {
     dashboard_url = "http://${aws_instance.server.private_ip}:5000/metrics"
     swap_mb       = var.swap_mb
     calibrate     = var.calibrate
+    token         = random_password.token.result
   })
 
   # instance.py reads the instance type over IMDSv2, so require it rather than

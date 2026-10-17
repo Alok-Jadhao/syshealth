@@ -150,8 +150,13 @@ A(para("Checks your credentials, that the AMI is pinned and the demo tag exists,
 A(expect("a table of four sizes, all <font face='Courier'>online=yes</font>, then a dashboard URL."))
 
 A(para("Rehearse once, then let it settle", H2))
-E(code("""curl -X POST "$(terraform output -raw dashboard_url)/run-stress"
+E(code("""export SYSHEALTH_TOKEN=$(terraform output -raw token)
+curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" \\
+  "$(terraform output -raw dashboard_url)/run-stress"
 sleep 45 && ./check.sh"""))
+A(para("Starting a test needs the fleet's token, which Terraform made. Keep "
+       "<font face='Courier'>terraform output -raw token</font> to hand: the dashboard asks "
+       "for it on the first <b>Start</b>.", SMALL))
 A(expect("micro and small DEGRADED or CRITICAL, medium and large HEALTHY. "
          "If not, see section 4 before your teacher arrives."))
 A(para("Then wait about two minutes for pressure to fall back to zero, so the live "
@@ -178,8 +183,9 @@ E(say("This is PSI — pressure stall information, straight from the Linux kerne
 A(para("Step 3 — Load all four at once", H2))
 A(para("Open <b>Load test</b>. Leave it on <b>Peak load</b>, 1600 MB for 60 seconds, "
        "and point at the preview: the peak is 168% of the micro's RAM and 84% of the "
-       "small's. Press <b>Start</b>. Or from the terminal:", BODY))
-E(code('curl -X POST "$(terraform output -raw dashboard_url)/run-stress"'))
+       "small's. Press <b>Start</b> (pasting the token if it asks). Or from the terminal:", BODY))
+E(code('curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" \\\n'
+       '  "$(terraform output -raw dashboard_url)/run-stress"'))
 A(para("All four are asked in parallel, within a few milliseconds, so the comparison "
        "is fair. Each runs the same job: two workers, 800 MB each, for 60 seconds.", SMALL))
 E(say("Same workload, same moment, four different machines. Watch which ones feel it."))

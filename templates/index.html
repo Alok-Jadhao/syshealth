@@ -128,6 +128,16 @@
           <p class="lt-error" id="lt-error" role="alert" hidden></p>
         </div>
 
+        <div class="lt-fields" id="lt-token-row" hidden>
+          <label class="field field-wide">
+            <span class="field-label">Server token</span>
+            <span class="input-unit"><input type="password" id="lt-token" autocomplete="off" spellcheck="false"></span>
+            <span class="field-note">This server only starts and stops tests for someone with its token
+              (<code>SYSHEALTH_TOKEN</code>; after Terraform, <code>terraform output -raw token</code>).
+              Kept in this browser only.</span>
+          </label>
+        </div>
+
         <div class="lt-actions">
           <button type="submit" class="primary-btn" id="lt-start">Start test</button>
           <button type="button" class="ghost-btn" id="lt-stop" disabled>Stop test</button>

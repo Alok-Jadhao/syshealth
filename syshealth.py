@@ -1,3 +1,4 @@
+import hmac
 import os
 import time
 import json
@@ -18,6 +19,12 @@ from reporter import Reporter
 HOSTNAME = socket.gethostname()
 SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://13.61.11.18:5000/metrics")
 CONTROL_PORT = 5001
+# The secret shared with the server: sent with every push, and required of
+# anyone asking this machine to run a load test.
+TOKEN = os.environ.get("SYSHEALTH_TOKEN", "").strip() or None
+# "off" on a machine that should only be watched (your production box, with
+# SYSHEALTH_APP set): it reports as usual but never accepts a load test.
+CONTROL = os.environ.get("SYSHEALTH_CONTROL", "on").strip().lower() not in ("off", "0", "no", "false")
 
 
 def _make_killable():
@@ -169,7 +176,17 @@ class ControlHandler(BaseHTTPRequestHandler):
             raise ValueError("Expected a JSON object.")
         return body
 
+    def _authorized(self):
+        if not TOKEN:
+            return True
+        scheme, _, value = (self.headers.get("Authorization") or "").partition(" ")
+        return scheme.lower() == "bearer" and hmac.compare_digest(value.strip().encode(), TOKEN.encode())
+
     def do_POST(self):
+        # Before reading anything: this port can fill the machine's memory.
+        if not self._authorized():
+            self._reply(401, {"status": "rejected", "error": "wrong or missing token"})
+            return
         if self.path == "/stress":
             try:
                 body = self._body()
@@ -230,7 +247,13 @@ def push_to_server(payload):
     """
     global _push_failures
     try:
-        requests.post(SERVER_URL, json=payload, timeout=2)
+        r = requests.post(SERVER_URL, json=payload, timeout=2,
+                          headers={"Authorization": "Bearer " + TOKEN} if TOKEN else None)
+        if r.status_code == 401:
+            # Not a network failure, and retrying will not fix it: say what will.
+            raise requests.exceptions.RequestException(
+                "the server rejected this agent's SYSHEALTH_TOKEN" if TOKEN else
+                "the server needs a token; set SYSHEALTH_TOKEN to the server's")
         if _push_failures:
             print(f"push to {SERVER_URL} recovered after {_push_failures} failures", flush=True)
             _push_failures = 0
@@ -244,7 +267,8 @@ def push_to_server(payload):
 
 
 def main():
-    threading.Thread(target=run_control_server, daemon=True).start()
+    if CONTROL:
+        threading.Thread(target=run_control_server, daemon=True).start()
 
     collector = Collector()
     analyzer = Analyzer()
@@ -255,7 +279,14 @@ def main():
     identity = instance.detect()
     mem_total_mb = collector.read_mem_total_mb()
 
-    print(f"SysHealth started | control port {CONTROL_PORT}")
+    if not CONTROL:
+        print("SysHealth started | load tests off on this machine (SYSHEALTH_CONTROL=off)", flush=True)
+    elif TOKEN:
+        print(f"SysHealth started | control port {CONTROL_PORT}, token required", flush=True)
+    else:
+        print(f"SysHealth started | control port {CONTROL_PORT} WITHOUT a token: anything that "
+              "can reach it can start a load test. Set SYSHEALTH_TOKEN, or SYSHEALTH_CONTROL=off "
+              "on a machine that should only be watched.", flush=True)
     print(f"Instance: {identity['instance_type']} ({HOSTNAME})")
     if app:
         print(f"App: {app.path}" if app.path else
@@ -298,6 +329,8 @@ def main():
                 "baseline": analyzer.baseline,
                 # The load this box is under right now, if a test is running.
                 "load_test": runner.status(),
+                # False on a watch-only machine, so the server does not ask it.
+                "accepts_tests": CONTROL,
                 # Where the RAM is (programs, cache, free, swap) and how much
                 # of it is "in use" the way most dashboards count it.
                 "memory": why["memory"],
