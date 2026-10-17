@@ -24,11 +24,13 @@ monitor cannot, because a monitor only observes:
 | Why a machine is under pressure | Raw counters; you work it out | The likely cause in words (swapping, programs filling RAM, files re-read from disk), who holds the memory, and any process that only grows |
 | Compares itself with a usage alarm | No | Yes: what "alarm at 80% in use" would have bought instead, and why it would be wrong when it is |
 | Your app's own pressure, not just the machine's | Needs cAdvisor and more setup | One setting: `SYSHEALTH_APP=myapp.service`. Tells "raise the container's limit" from "buy a bigger instance" |
+| CPU credits on burstable sizes | No | Give your app's average CPU (measured from its cgroup) and each t2/t3/t4g size is priced with the credits it would burn, or ruled out where it would be throttled |
+| An AI agent can run the experiment | No | An MCP server: "is a t3.small big enough for my app?" is answered by a test, with the evidence and the limits of the answer ([below](#ask-an-ai-agent-mcp)) |
+| Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
 
 They also work together: SysHealth serves everything it knows in Prometheus's
 format at `GET /metrics`, the states, the cause data and the last test's verdict
 included ([below](#with-prometheus)).
-| Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
 
 ---
 
@@ -195,9 +197,10 @@ aws ec2 authorize-security-group-ingress --region $REGION \
 ```bash
 ssh -i syshealth-key.pem ubuntu@YOUR_SERVER_IP
 
-sudo apt update && sudo apt install -y python3-pip
-pip3 install flask requests
+sudo apt update && sudo apt install -y python3-flask python3-requests
 git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
+export SYSHEALTH_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
+echo "$SYSHEALTH_TOKEN"     # the agents and anyone starting a test need it
 nohup python3 server.py > server.log 2>&1 &
 ```
 
@@ -206,11 +209,12 @@ nohup python3 server.py > server.log 2>&1 &
 ```bash
 ssh -i syshealth-key.pem ubuntu@YOUR_AGENT_IP
 
-sudo apt update && sudo apt install -y python3-pip stress
+sudo apt update && sudo apt install -y python3-requests stress
 git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
 
-# Point agent at your server
-sed -i 's|http://127.0.0.1:5000/metrics|http://YOUR_SERVER_IP:5000/metrics|' syshealth.py
+# Point the agent at your server, with the server's token
+export SYSHEALTH_SERVER_URL=http://YOUR_SERVER_IP:5000/metrics
+export SYSHEALTH_TOKEN=<the server's token>
 
 # Calibrate baseline (60s idle measurement)
 python3 syshealth.py calibrate
@@ -276,31 +280,37 @@ reported as each machine's idle reference, but states no longer depend on it.
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | Live dashboard |
-| POST | `/metrics` | Agent metric push |
+| POST | `/metrics` | Agent metric push (token) |
 | GET | `/metrics` | Everything above for Prometheus to scrape ([below](#with-prometheus)) |
 | GET | `/instances` | All instances with online status and latest metrics |
 | GET | `/instances/<hostname>/history` | Last 60 samples for one instance |
-| GET | `/series` | Every instance's recent history — what the graph reads |
+| GET | `/series` | Every instance's recent history — what the graph reads; `?since=` only what is new |
+| GET | `/summary` | Each instance now and over the last hour in a few KB, with its app's measured peak memory and average CPU |
 | POST | `/load-plan` | Preview a load test: the plan and the commands, without running it |
-| POST | `/run-stress` | Run a load test on all online agents (no body: the old default test) |
-| POST | `/stop-stress` | Stop the running load test on all online agents |
-| GET | `/report` | Which size to buy, from the last test: `?need_mb=` your app's peak, `?margin=` % spare, `?test_id=` an earlier test |
+| POST | `/run-stress` | Run a load test on all online agents that take tests (token; no body: the old default test) |
+| POST | `/stop-stress` | Stop the running load test on all online agents (token) |
+| GET | `/report` | Which size to buy, from the last test: `?need_mb=` your app's peak, `?margin=` % spare, `?cpu=` its average vCPUs, `?test_id=` an earlier test |
+
+"(token)": with `SYSHEALTH_TOKEN` set on the server, these need
+`Authorization: Bearer <token>` ([below](#who-can-start-a-test)). Reading is
+open to anyone who can reach the port.
 
 ```bash
 # List all instances
 curl http://YOUR_SERVER_IP:5000/instances
 
 # The old fixed test: 1.6 GB (2 workers x 800 MB) for 60 s
-curl -X POST http://YOUR_SERVER_IP:5000/run-stress
+curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" http://YOUR_SERVER_IP:5000/run-stress
 
 # A variable test: ramp 200 MB -> 1.6 GB in 5 steps of a minute
-curl -X POST http://YOUR_SERVER_IP:5000/run-stress -H 'Content-Type: application/json' \
+curl -X POST http://YOUR_SERVER_IP:5000/run-stress -H "Authorization: Bearer $SYSHEALTH_TOKEN" \
+  -H 'Content-Type: application/json' \
   -d '{"mode":"variable","pattern":"ramp","low_mb":200,"high_mb":1600,"steps":5,"step_sec":60,"workers":2}'
 
-curl -X POST http://YOUR_SERVER_IP:5000/stop-stress
+curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" http://YOUR_SERVER_IP:5000/stop-stress
 
-# Which size to buy for an app that peaks at 1.2 GB, keeping 30% spare
-curl 'http://YOUR_SERVER_IP:5000/report?need_mb=1200&margin=30'
+# Which size to buy for an app that peaks at 1.2 GB and averages half a vCPU, keeping 30% spare
+curl 'http://YOUR_SERVER_IP:5000/report?need_mb=1200&margin=30&cpu=0.5'
 ```
 
 ---
@@ -369,6 +379,26 @@ Your app's peak is asked for on the form (for a peak test it is the memory
 held), and it and the margin can be changed afterwards on the panel, or with
 `?need_mb=` and `?margin=`: no need to run the test again.
 
+**CPU.** The test loads memory, so it says nothing about CPU, and on the
+burstable sizes most often compared (t2, t3, t3a, t4g) CPU has its own price.
+Each earns CPU credits at a fixed rate: a t3.micro can keep 0.2 of a vCPU busy
+on average for free, a t3.large 0.6. Give your app's average CPU on the panel
+("Its average CPU", in vCPUs), or `?cpu=`, or `--cpu`, and each size is judged
+on it too:
+
+- **Unlimited mode** (the t3, t3a and t4g default): every vCPU-hour above the
+  baseline is billed, $0.05 for t3, $0.04 for t4g, and here $0.05 for t3a too,
+  which AWS's price page does not list on its own. That is added to the
+  size's monthly price and can change which size is cheapest: an app averaging
+  0.9 vCPU adds $25.55 a month to a t3.micro but $10.95 to a t3.large.
+- **Standard mode** (the t2 default): above the baseline the CPU is held down
+  once saved credits run out, so the size is ruled out.
+- Any size with fewer vCPUs than the average plus the margin is ruled out.
+
+The credit rates are AWS's own credit table and its "T2/T3/T4g Unlimited Mode
+Pricing", in `pricing.py`. Your app's average is measured for you with
+`SYSHEALTH_APP` ([below](#measure-your-app-not-the-whole-machine)).
+
 **Prices** are AWS's on-demand Linux list prices for the region each agent
 reports, from `data/prices.json`. The file records the date it was fetched,
 and the report shows it. `python3 tools/update_prices.py` refreshes it from
@@ -387,7 +417,7 @@ Python standard library:
 ```bash
 python3 cli.py status                                   # who is reporting, and their state
 python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
-python3 cli.py report --need 1200 --margin 30            # the last test, judged again
+python3 cli.py report --need 1200 --margin 30 --cpu 0.5  # the last test, judged again
 python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
 ```
 
@@ -398,7 +428,8 @@ fits or the test fell short of the app's need, and 3 when `--expect` named a
 different size. That makes it a CI gate: fail the build when the app has
 outgrown the size it is deployed on. Ctrl-C stops the test everywhere.
 `--dry-run` checks a test without running it. The server is `--server`,
-`$SYSHEALTH_URL`, or `http://127.0.0.1:5000`.
+`$SYSHEALTH_URL`, or `http://127.0.0.1:5000`; its token goes in
+`$SYSHEALTH_TOKEN` (an environment variable, so it stays out of shell history).
 
 **The whole experiment in one command.** `terraform/rightsize.sh` builds a fleet
 of the sizes you name, waits for them, runs the test, saves the report and
@@ -484,6 +515,75 @@ In the demo, the app runs in a container capped at 512 MB on the t3.large. When
 the background load reaches it, the machine stays healthy and the app tile
 does not.
 
+The agent also reads the app's CPU from the same cgroup (`cpu.stat`), in vCPUs
+kept busy. `GET /summary` (and the MCP server's `fleet_status`) gives its
+average and peak over the last hour beside its peak memory: the two numbers to
+judge sizes against.
+
+**On a production machine, watch only.** Set `SYSHEALTH_CONTROL=off` there: the
+agent reports as usual but opens no control port and never takes a load test,
+and the server skips it when one starts. Measure the app where it really runs,
+then test the sizes on a fleet built for that.
+
+---
+
+## Who can start a test
+
+A load test fills memory on every machine that takes one, so starting one is
+guarded. Set the same `SYSHEALTH_TOKEN` on the server and every agent:
+
+- agents send it with every push, and the server drops pushes without it;
+- the server wants it to start or stop a test, and passes it on to each
+  agent's control port (5001), which refuses anything without it;
+- the dashboard asks for it the first time you press **Start**, and keeps it
+  in that browser only; `cli.py` and the MCP server read `$SYSHEALTH_TOKEN`.
+
+`terraform/` makes one for each fleet (`terraform output -raw token`), and
+`rightsize.sh` uses it for you. Without a token nothing is checked, as before,
+and the agent says so when it starts; the security groups in `terraform/` then
+remain the only guard. Reading (the dashboard, `/series`, `/report`,
+`/metrics`) stays open to anyone who can reach port 5000.
+
+---
+
+## Ask an AI agent (MCP)
+
+`mcp_server.py` lets an AI agent (any client that speaks the Model Context
+Protocol) run the experiment, not just read a graph. Add it to the agent's MCP
+servers; most clients take an entry like this (the file it goes in varies):
+
+```json
+{
+  "mcpServers": {
+    "syshealth": {
+      "command": "python3",
+      "args": ["/path/to/syshealth/mcp_server.py"],
+      "env": {
+        "SYSHEALTH_URL": "http://YOUR_SERVER_IP:5000",
+        "SYSHEALTH_TOKEN": "<token>"
+      }
+    }
+  }
+}
+```
+
+Then ask: *"Is a t3.small big enough for my app? Run a ramp test if you need
+to."* With `npm run dev` running, leave out the variables and it uses the demo.
+
+| Tool | Does |
+|---|---|
+| `fleet_status` | Each machine's state, why it is under pressure, what is growing, and its app's measured peak memory and average CPU |
+| `plan_load_test` | Checks a test and says how long it takes and which machines run it; runs nothing |
+| `start_load_test` | Starts it (marked destructive: the agent should ask first) |
+| `stop_load_test` | Stops it |
+| `rightsize_report` | Which size to buy and its price, the evidence (pressure at each load level), what a usage alarm would pick, and the limits of the answer |
+
+Every answer comes as readable text and as structured data. The limits are
+part of it: the load is synthetic, capacity between levels is interpolated and
+errs low, CPU is worked out rather than measured, prices are list prices. An
+agent passes those on instead of overstating the result. Standard library
+only, like `cli.py`; checked with the official MCP Python SDK's client.
+
 ---
 
 ## With Prometheus
@@ -528,7 +628,8 @@ syshealth/
 ├── diagnose.py        # Where the memory is, the likely cause, growing processes
 ├── prometheus.py      # GET /metrics in Prometheus's text format
 ├── cli.py             # Run a test and print the verdict; exit codes for CI
-├── pricing.py         # What each size costs, from data/prices.json
+├── mcp_server.py      # The same for AI agents: MCP over stdio
+├── pricing.py         # What each size costs, from data/prices.json; burstable CPU credits
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
