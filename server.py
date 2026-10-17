@@ -199,6 +199,81 @@ def snapshot():
     return out
 
 
+def _mean(values):
+    values = [v for v in values if isinstance(v, (int, float))]
+    return round(sum(values) / len(values), 3) if values else None
+
+
+def _peak(values):
+    values = [v for v in values if isinstance(v, (int, float))]
+    return max(values) if values else None
+
+
+def summarise(inst, now):
+    """One machine in a few hundred bytes: now, the last hour, and its app."""
+    samples = list(inst["history"])
+    latest = inst["latest"] or {}
+    memory = latest.get("memory") or {}
+    diagnosis = latest.get("diagnosis") or {}
+    states = {}
+    for s in samples:
+        states[s.get("state") or "UNKNOWN"] = states.get(s.get("state") or "UNKNOWN", 0) + 1
+    out = {
+        "hostname": inst["hostname"],
+        "instance_type": inst["instance_type"],
+        "region": latest.get("region"),
+        "online": (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC,
+        "seconds_since": round(now - inst["last_seen"], 1),
+        "accepts_tests": latest.get("accepts_tests") is not False,
+        "now": {
+            "state": latest.get("state"),
+            "reason": latest.get("reason"),
+            "pressure_10s": latest.get("psi"),
+            "pressure_minute": latest.get("avg_psi"),
+            "full_10s": latest.get("psi_full"),
+            "cpu_pressure": (latest.get("pressure") or {}).get("cpu"),
+            "io_pressure": (latest.get("pressure") or {}).get("io"),
+            "memory": memory or None,
+            "cause": diagnosis.get("cause"),
+            "leak": diagnosis.get("leak"),
+            "top": diagnosis.get("top"),
+            "load_test": latest.get("load_test"),
+        },
+        "hour": {
+            "minutes": round((samples[-1].get("received_ts", 0) - samples[0].get("received_ts", 0)) / 60.0, 1)
+            if len(samples) > 1 else 0,
+            "states": states,
+            "worst_minute": _peak([s.get("avg_psi") for s in samples]),
+            "peak_used_pct": _peak([(s.get("memory") or {}).get("used_pct") for s in samples]),
+        },
+        "app": None,
+    }
+    apps = [s["app"] for s in samples if isinstance(s.get("app"), dict)]
+    if apps:
+        # What to type into the report: the app's measured peak and average CPU.
+        out["app"] = {
+            "name": apps[-1].get("name"),
+            "now": latest.get("app"),
+            "peak_mb": _peak([a.get("current_mb") for a in apps]),
+            "peak_anon_mb": _peak([a.get("anon_mb") for a in apps]),
+            "avg_cpu_vcpu": _mean([a.get("cpu_vcpu") for a in apps]),
+            "peak_cpu_vcpu": _peak([a.get("cpu_vcpu") for a in apps]),
+            "worst_pressure": _peak([a.get("psi") for a in apps]),
+            "samples": len(apps),
+        }
+    return out
+
+
+@app.route("/summary", methods=["GET"])
+def summary():
+    """Each machine now and over the last hour, small enough to poll."""
+    now = time.time()
+    rows = [summarise(inst, now) for inst in list(instances.values())]
+    rows.sort(key=by_size)
+    running = sorted({str(t.get("test_id")) for t in _running_tests(now).values() if t.get("test_id")})
+    return jsonify({"instances": rows, "running_tests": running})
+
+
 def _arg_int(name, low, high, label):
     raw = request.args.get(name, "").strip()
     if not raw:

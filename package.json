@@ -7,6 +7,7 @@
     "dev": "python3 dev.py",
     "test": "python3 -m unittest discover -s tests",
     "report": "python3 cli.py report",
+    "mcp": "python3 mcp_server.py",
     "start": "python3 server.py",
     "agent": "python3 syshealth.py",
     "calibrate": "python3 syshealth.py calibrate"
