@@ -184,7 +184,9 @@
         : null,
       // Only the newest sample of each instance carries it (server.py).
       diagnosis: raw.diagnosis && typeof raw.diagnosis === 'object' ? raw.diagnosis : null,
-      pressure: raw.pressure && typeof raw.pressure === 'object' ? raw.pressure : null
+      pressure: raw.pressure && typeof raw.pressure === 'object' ? raw.pressure : null,
+      // One app's own cgroup, when the agent runs with SYSHEALTH_APP.
+      app: raw.app && typeof raw.app === 'object' && num(raw.app.psi) !== null ? raw.app : null
     };
   }
 
@@ -1454,6 +1456,11 @@
       if (cause && cause.action && key !== 'healthy') {
         said.action = cause.action;
       }
+      // A healthy machine can still have a starving app, held by its own limit.
+      var appVerdict = latest.app && latest.app.verdict;
+      if (appVerdict && appVerdict.action && key === 'healthy') {
+        said.action = 'For ' + (latest.app.name || 'your app') + ': ' + appVerdict.action;
+      }
       $('#hero-meaning').textContent = (describeWait(minute) + ' ' + said.meaning).trim();
       $('#hero-action').textContent = said.action ? 'What to do: ' + said.action : '';
       // The analyser's own words, only where they add something the lines
@@ -1481,7 +1488,34 @@
       ? testProgress(test, latest) || 'Running'
       : 'No test running';
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
+    renderApp(latest, th);
     renderWhy(latest);
+  }
+
+  // The app's own pressure, from its cgroup: whether it is the app that
+  // waits, and whether its own limit or the machine is to blame.
+  function renderApp(latest, th) {
+    var app = latest && latest.app;
+    $('#tile-app-box').hidden = !app;
+    $('#why-app').hidden = !(app && app.verdict);
+    if (!app) {
+      return;
+    }
+    $('#tile-app-name').textContent = app.name || 'cgroup';
+    $('#tile-app').textContent = formatPct(num(app.psi)) + '%';
+    var note = 'Waiting for memory in its own cgroup, last 10 s. ';
+    note += app.limit_mb
+      ? formatMb(app.current_mb) + ' of its ' + formatMb(app.limit_mb) + ' limit.'
+      : formatMb(app.current_mb) + ', no limit.';
+    if (app.oom_kills) {
+      note += ' Killed for going over ' + app.oom_kills + '×.';
+    }
+    $('#tile-app-note').textContent = note;
+    $('#tile-app').setAttribute('data-state', bandName(num(app.psi), th));
+    if (app.verdict) {
+      $('#why-app').textContent = app.verdict.text +
+        (app.verdict.action ? ' ' + app.verdict.action : '');
+    }
   }
 
   var MEM_PARTS = [
@@ -1611,6 +1645,9 @@
       var note = 'now ' + formatPct(latest.psi) + '% · peak ' + formatPct(peak) + '% in range';
       if (latest.memory) {
         note += ' · ' + formatPct(latest.memory.used_pct) + '% in use';
+      }
+      if (latest.app) {
+        note += ' · app waiting ' + formatPct(num(latest.app.psi)) + '%';
       }
       if (!inst.online && inst.secondsSince !== null) {
         note += ' · last seen ' + formatAgo(inst.secondsSince * 1000);

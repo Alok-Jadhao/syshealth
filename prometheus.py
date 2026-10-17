@@ -129,6 +129,26 @@ def render(snapshot, report=None):
             out.metric("syshealth_swap_used_bytes", "gauge", "Swap in use.",
                        int(memory.get("swap_used_mb") or 0) * MIB, base)
 
+        app = latest.get("app")
+        if app and app.get("psi") is not None:
+            labels = dict(base, app=app.get("name"))
+            out.metric("syshealth_app_memory_waiting_ratio", "gauge",
+                       "Share of the last 10 s in which a task in the app's cgroup waited for memory.",
+                       _ratio(app.get("psi")), labels)
+            out.metric("syshealth_app_memory_stalled_ratio", "gauge",
+                       "Share of the last 10 s in which every task in the app's cgroup waited at once.",
+                       _ratio(app.get("psi_full")), labels)
+            if app.get("current_mb") is not None:
+                out.metric("syshealth_app_memory_bytes", "gauge", "Memory the app's cgroup holds.",
+                           int(app["current_mb"]) * MIB, labels)
+            if app.get("limit_mb"):
+                out.metric("syshealth_app_memory_limit_bytes", "gauge",
+                           "The app cgroup's memory limit (memory.max).", int(app["limit_mb"]) * MIB, labels)
+            if app.get("oom_kills") is not None:
+                out.metric("syshealth_app_oom_kills_total", "counter",
+                           "Processes the kernel killed in the app's cgroup for going over its limit.",
+                           int(app["oom_kills"]), labels)
+
         test = latest.get("load_test") if inst.get("online") else None
         out.metric("syshealth_load_test_bytes", "gauge",
                    "Memory the running load test asks this machine to hold; 0 when none runs.",

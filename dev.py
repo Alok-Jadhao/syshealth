@@ -28,7 +28,7 @@ try:
     import loadtest
     import server
     from analyzer import Analyzer, THRESHOLDS
-    from diagnose import Diagnoser
+    from diagnose import Diagnoser, app_verdict
 except ModuleNotFoundError as exc:
     # Ubuntu refuses `pip install` into the system Python (PEP 668), so the
     # obvious next move fails too. Say what does work instead of leaving a
@@ -102,6 +102,13 @@ DEMO_TEST_ENDS_AGO = 240.0
 BASE_PROCESSES = [("python3 syshealth.py", 31), ("snapd", 24), ("amazon-ssm-agent", 21),
                   ("multipathd", 18), ("systemd-journald", 14)]
 APP_PROCESS = "node server.js"
+# The app runs in a container on every size; on the t3.large it is capped at
+# 512 MB. The background story's mild spell (650 MB) is then too much for the
+# container but nothing for the machine: SYSHEALTH_APP's case for raising a
+# limit rather than buying a bigger instance.
+APP_UNIT = "node-app.service"
+APP_LIMITS = {"t3.large": 512}
+APP_BASE_MB = 60
 KERNEL_MB = 110        # slab, page tables and the rest of the kernel's own use
 IDLE_CACHE_SHARE = 0.4  # file cache on an idle box, as a share of RAM
 MIN_CACHE_MB = 60      # the kernel keeps this much cache before it swaps
@@ -214,6 +221,34 @@ class FakeMachine:
         full = some * min(0.85, max(0.0, (ratio - 0.95) / 1.5))
         return some, full
 
+    def app_for(self, ts, testing, machine_some):
+        """The app's own cgroup: what SYSHEALTH_APP reports on a real agent.
+
+        It waits when the machine is short (it is one of the stalled tasks),
+        and, where it has a limit, when it presses against that.
+        """
+        limit = APP_LIMITS.get(self.instance_type)
+        # Outside a test, the background story is the app's own load.
+        demand = 0.0 if testing else self.cycle_demand(ts)
+        want = APP_BASE_MB + demand
+        some = machine_some * 0.85
+        if limit:
+            ratio = want / float(limit)
+            x = min(1.0, max(0.0, ratio - 0.85))
+            some = max(some, 0.05 + 220.0 * x ** 1.5)
+        current = min(want, limit) if limit else want
+        some = min(99.0, max(0.0, some * self.rng.uniform(0.85, 1.15)))
+        return {
+            "name": APP_UNIT,
+            "psi": round(some, 2),
+            "psi_full": round(some * 0.6, 2),
+            "current_mb": int(current),
+            "limit_mb": limit,
+            "anon_mb": int(current * 0.9),
+            "file_mb": int(current * 0.1),
+            "oom_kills": 0,
+        }
+
     def memory_for(self, demand_mb, held_by):
         """Synthetic /proc/meminfo (kB) and top processes for holding `demand_mb`.
 
@@ -286,6 +321,10 @@ class FakeMachine:
             }
         else:
             demand = self.cycle_demand(ts)
+            # The app cannot hold more than its container allows.
+            limit = APP_LIMITS.get(self.instance_type)
+            if limit:
+                demand = min(demand, limit - APP_BASE_MB)
 
         some, full = self.pressure_for(demand)
         some = max(0.0, some * self.rng.uniform(0.82, 1.18))
@@ -323,6 +362,7 @@ class FakeMachine:
         some = round(some, 2)
         full = round(full, 2)
 
+        app = self.app_for(ts, current is not None, some)
         result = self.analyzer.update(some, full, vmstat)
         why = self.diagnoser.update(vmstat, meminfo, top, result, THRESHOLDS,
                                     now=ts, exclude=("stress",))
@@ -342,9 +382,11 @@ class FakeMachine:
             "load_test": status,
             "memory": why["memory"],
             "diagnosis": {k: why[k] for k in ("cause", "leak", "top", "rates")},
+            "app": app,
             "demo": True,
         }
         payload.update(result)
+        app["verdict"] = app_verdict(app, why["memory"], THRESHOLDS)
         payload["avg_psi"] = round(payload["avg_psi"], 4)
         payload["avg_psi_full"] = round(payload["avg_psi_full"], 4)
         return payload

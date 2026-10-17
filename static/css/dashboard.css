@@ -621,6 +621,14 @@ main {
   letter-spacing: -0.01em;
 }
 
+.tile-value[data-state="degraded"] {
+  color: var(--status-serious);
+}
+
+.tile-value[data-state="critical"] {
+  color: var(--status-critical);
+}
+
 .tile-note {
   margin: 4px 0 0;
   color: var(--text-muted);

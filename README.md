@@ -23,6 +23,7 @@ monitor cannot, because a monitor only observes:
 | Which size to buy, and what it costs | No | Yes: the cheapest size that fits, priced, with what the others would cost |
 | Why a machine is under pressure | Raw counters; you work it out | The likely cause in words (swapping, programs filling RAM, files re-read from disk), who holds the memory, and any process that only grows |
 | Compares itself with a usage alarm | No | Yes: what "alarm at 80% in use" would have bought instead, and why it would be wrong when it is |
+| Your app's own pressure, not just the machine's | Needs cAdvisor and more setup | One setting: `SYSHEALTH_APP=myapp.service`. Tells "raise the container's limit" from "buy a bigger instance" |
 
 They also work together: SysHealth serves everything it knows in Prometheus's
 format at `GET /metrics`, the states, the cause data and the last test's verdict
@@ -417,6 +418,7 @@ depends on why. Each agent reads the kernel's own evidence (`/proc/meminfo`,
 
 | Cause | Evidence | What to do |
 |---|---|---|
+| A memory limit | Pressure while a quarter of RAM or more is still available: something is held to its own limit (a container, a unit's `MemoryMax`) | Raise that limit; [watch the app](#measure-your-app-not-the-whole-machine) |
 | Swapping | Memory read back from swap, 1 MB/s or more | A size with more RAM; more swap only hides it |
 | Programs fill RAM | Recently dropped file pages read back from disk, 1 MB/s or more, with programs holding 70%+ of RAM | A size with more RAM, or make the app hold less |
 | Files do not fit | The same re-reading, while programs hold less | More RAM for the cache, or read fewer files at once |
@@ -436,6 +438,50 @@ Each agent also reports CPU and disk I/O pressure, shown beside the memory
 breakdown. States go by memory alone; the other two are context, for example
 when re-reading files from disk costs more in I/O waits than it shows as
 memory pressure.
+
+---
+
+## Measure your app, not the whole machine
+
+The machine's pressure counts every task on it: the agent, the OS, a load
+test. Name your app and the agent also reads its own cgroup:
+
+```bash
+SYSHEALTH_APP=myapp.service python3 syshealth.py         # a systemd unit
+SYSHEALTH_APP=system.slice/docker-<id>.scope python3 syshealth.py   # a container
+```
+
+A unit name, a path under `/sys/fs/cgroup`, or a full path all work; it needs
+cgroup v2, the default on current distributions. The dashboard gains a
+**Your app** tile: the share of time tasks *in the app* waited for memory, what
+it holds against its memory limit (a container's, or systemd's `MemoryMax`),
+and how often the kernel has killed something in it for going over. When the
+app is waiting, it says whose fault that is:
+
+- **Its own limit**: the app is at 90% or more of its limit while a quarter of
+  the machine's RAM or more is still available. Raise the limit; a bigger
+  instance would not help.
+- **The machine**: the app is well under its limit, but the machine is short.
+  A bigger instance, or less else running beside it.
+- **Both**, when the app is at its limit and the machine is short too.
+- **A limit above it**: the app is under its own limit and the machine has
+  room, so the group it runs in (a pod, a systemd slice) is the likely cap.
+
+That is the decision for a container's memory limit, made the same way as the
+instance size: by whether anything waits, not by how full it looks.
+
+Whose fault it is gets judged by how much memory the machine has available, not
+by the machine's pressure, and that was learned by measuring. A process held to
+150 MB that kept 180 MB in use, on a laptop with gigabytes free: its own cgroup
+waited 14–31% of the time, and the machine-wide figure rose too, to 10–22%. The
+kernel counts a container's waits at its own limit in the machine's pressure
+as well. So the machine-level diagnosis has a matching cause: pressure while a
+quarter of RAM or more is still available is put down to a limit, not to the
+machine running out.
+
+In the demo, the app runs in a container capped at 512 MB on the t3.large. When
+the background load reaches it, the machine stays healthy and the app tile
+does not.
 
 ---
 
@@ -460,6 +506,7 @@ scrape_configs:
 | `syshealth_memory_bytes{part=…}`, `syshealth_memory_in_use_ratio`, `syshealth_swap_used_bytes` | Where the RAM is |
 | `syshealth_load_test_bytes` | The memory a running test asks for, 0 when none runs |
 | `syshealth_capacity_bytes{kind=…}`, `syshealth_recommended`, `syshealth_price_usd_per_hour`, `syshealth_app_need_bytes` | The last finished test's verdict, per size |
+| `syshealth_app_memory_waiting_ratio`, `_stalled_ratio`, `syshealth_app_memory_bytes`, `_limit_bytes`, `syshealth_app_oom_kills_total` | The app's own cgroup, with `SYSHEALTH_APP` |
 
 Every series carries `hostname`, `instance_type`, `instance_id` and `region`.
 Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and

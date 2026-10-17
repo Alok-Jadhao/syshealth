@@ -106,3 +106,74 @@ class Collector:
             return metrics
         except (FileNotFoundError, IndexError, ValueError):
             return metrics
+
+
+CGROUP_ROOT = '/sys/fs/cgroup'
+
+
+def resolve_cgroup(spec, root=CGROUP_ROOT):
+    """The cgroup directory for SYSHEALTH_APP, or None.
+
+    Accepts a systemd unit ("myapp.service", or just "myapp"), a path under
+    the cgroup root ("system.slice/docker-<id>.scope"), or a full path. Needs
+    cgroup v2, where each group has its own memory.pressure.
+    """
+    if not spec:
+        return None
+    spec = spec.strip()
+    if spec.startswith('/'):
+        candidates = [spec if spec.startswith(root) else root + spec]
+    else:
+        candidates = [os.path.join(root, spec), os.path.join(root, 'system.slice', spec)]
+        if '.' not in spec:
+            candidates.append(os.path.join(root, 'system.slice', spec + '.service'))
+    for path in candidates:
+        if os.path.isfile(os.path.join(path, 'memory.pressure')):
+            return path
+    return None
+
+
+class AppCgroup:
+    """One app's own memory pressure, from its cgroup rather than the machine.
+
+    The machine's PSI counts every task: the agent, sshd, the OS, and a load
+    test. A cgroup's memory.pressure counts only the tasks inside it, so it
+    says whether *your app* is waiting. With a memory limit (a container's,
+    or systemd's MemoryMax) it also says how close the app runs to it, and
+    how often the kernel has killed something inside it for going over.
+    """
+
+    def __init__(self, spec, root=CGROUP_ROOT):
+        self.spec = spec
+        self.path = resolve_cgroup(spec, root)
+        self.name = spec.strip().rstrip('/').split('/')[-1] if spec else None
+
+    def _read(self, name):
+        with open(os.path.join(self.path, name), 'r') as f:
+            return f.read()
+
+    def read(self):
+        if not self.path:
+            return None
+        out = {'name': self.name}
+        try:
+            for line in self._read('memory.pressure').splitlines():
+                parts = line.split()
+                if parts and parts[0] in ('some', 'full'):
+                    out['psi' if parts[0] == 'some' else 'psi_full'] = float(parts[1].split('=')[1])
+            out['current_mb'] = int(self._read('memory.current')) // (1024 * 1024)
+            limit = self._read('memory.max').strip()
+            out['limit_mb'] = None if limit == 'max' else int(limit) // (1024 * 1024)
+            for line in self._read('memory.stat').splitlines():
+                key, _, value = line.partition(' ')
+                if key in ('anon', 'file'):
+                    out[key + '_mb'] = int(value) // (1024 * 1024)
+            for line in self._read('memory.events').splitlines():
+                key, _, value = line.partition(' ')
+                if key == 'oom_kill':
+                    out['oom_kills'] = int(value)
+        except (OSError, ValueError, IndexError):
+            # The app stopped, or the unit was restarted into a new group.
+            self.path = resolve_cgroup(self.spec)
+            return None
+        return out

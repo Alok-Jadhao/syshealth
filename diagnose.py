@@ -40,6 +40,13 @@ SWAPIN_MB_S = 1.0      # memory coming back from swap
 REFAULT_MB_S = 1.0     # recently dropped file pages read back from disk
 PROGRAMS_SHARE = 0.7   # programs' own memory, as a share of RAM
 
+# Pressure while this much of RAM is still available is not the machine
+# running out: something is held to a memory limit of its own (a container,
+# or a systemd unit's MemoryMax). The kernel counts those waits machine-wide
+# too, so the machine's pressure alone cannot tell the two apart.
+ROOMY_SHARE = 0.25
+APP_NEAR_LIMIT = 0.9   # an app at this share of its limit is pressing against it
+
 # A leak: steady growth for at least this long, by at least this much.
 LEAK_WINDOW_SEC = 600
 LEAK_MIN_SPAN_SEC = 300
@@ -138,6 +145,16 @@ def classify(rates, memory, avg_psi, avg_full, state, thresholds):
     programs_share = memory["programs_mb"] / float(memory["total_mb"])
     pct = int(round(programs_share * 100))
 
+    if memory["available_mb"] >= ROOMY_SHARE * memory["total_mb"]:
+        return {
+            "key": "limit",
+            "text": "The machine still has %s available, so this is not it running out: "
+                    "something on it is most likely held to a memory limit of its own, a "
+                    "container or a service with MemoryMax, and is waiting at that limit."
+                    % _mb_words(memory["available_mb"]),
+            "action": "Find which, and raise its limit. Set SYSHEALTH_APP to watch it directly. "
+                      "A bigger instance would not help.",
+        }
     if swapin >= SWAPIN_MB_S:
         return {
             "key": "swap",
@@ -175,6 +192,57 @@ def classify(rates, memory, avg_psi, avg_full, state, thresholds):
         "text": "%d%% of RAM is in use, %d%% by programs. Nothing stands out as the cause: no "
                 "swapping, and little re-reading from disk." % (int(round(memory["used_pct"])), pct),
         "action": "",
+    }
+
+
+def _mb_words(value):
+    return "%.1f GB" % (value / 1024.0) if value >= 1024 else "%d MB" % value
+
+
+def app_verdict(app, memory, thresholds):
+    """Whether the app is short of memory, and whose fault that is: its own
+    limit, a limit on the group it runs in, or the machine's RAM.
+
+    Judged by how much memory the machine has available, not by its pressure:
+    the kernel counts the app's waits at its own limit machine-wide as well.
+    """
+    if not app or app.get("psi") is None or app["psi"] < thresholds["degraded"]:
+        return None
+    name, psi = app.get("name") or "The app", app["psi"]
+    limit, current = app.get("limit_mb"), app.get("current_mb")
+    near_limit = bool(limit) and current is not None and current >= APP_NEAR_LIMIT * limit
+    roomy = bool(memory) and memory["available_mb"] >= ROOMY_SHARE * memory["total_mb"]
+    spare = " (%s available)" % _mb_words(memory["available_mb"]) if memory else ""
+
+    if near_limit and roomy:
+        return {
+            "key": "app_limit",
+            "text": "%s is waiting for memory %.0f%% of the time because it is at its own limit, "
+                    "%d of %d MB, while the machine has room to spare%s."
+                    % (name, psi, current, limit, spare),
+            "action": "Raise the app's memory limit. A bigger instance would not help.",
+        }
+    if near_limit:
+        return {
+            "key": "app_limit_and_machine",
+            "text": "%s is waiting for memory %.0f%% of the time: it is at its own limit, %d of "
+                    "%d MB, and the machine is short of memory as well." % (name, psi, current, limit),
+            "action": "Raise the limit, and give the machine more RAM to back it.",
+        }
+    if roomy:
+        return {
+            "key": "app_parent",
+            "text": "%s is waiting for memory %.0f%% of the time, though it is %s and the "
+                    "machine has room%s: a limit on the group it runs in, a pod or a systemd "
+                    "slice, is the likely cap."
+                    % (name, psi, "under its own limit" if limit else "not limited itself", spare),
+            "action": "Check the limits of the slice or pod around it.",
+        }
+    return {
+        "key": "app_machine",
+        "text": "%s is waiting for memory %.0f%% of the time because the machine is short of it%s."
+                % (name, psi, "" if not limit else ", well before its own %d MB limit" % limit),
+        "action": "A size with more RAM, or less else running beside it.",
     }
 
 

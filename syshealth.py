@@ -10,9 +10,9 @@ import requests
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import instance
 import loadtest
-from collector import Collector
+from collector import AppCgroup, Collector
 from analyzer import Analyzer, THRESHOLDS
-from diagnose import Diagnoser
+from diagnose import Diagnoser, app_verdict
 from reporter import Reporter
 
 HOSTNAME = socket.gethostname()
@@ -249,12 +249,18 @@ def main():
     collector = Collector()
     analyzer = Analyzer()
     diagnoser = Diagnoser()
+    # Optional: one app's own memory pressure, from its cgroup.
+    app = AppCgroup(os.environ.get("SYSHEALTH_APP")) if os.environ.get("SYSHEALTH_APP") else None
     reporter = Reporter()
     identity = instance.detect()
     mem_total_mb = collector.read_mem_total_mb()
 
     print(f"SysHealth started | control port {CONTROL_PORT}")
     print(f"Instance: {identity['instance_type']} ({HOSTNAME})")
+    if app:
+        print(f"App: {app.path}" if app.path else
+              f"App: no cgroup v2 group found for SYSHEALTH_APP={app.spec!r}; "
+              "reporting the machine only", flush=True)
     print("-" * 50)
 
     try:
@@ -269,6 +275,9 @@ def main():
             # meant to grow, so it is never reported as a leak.
             why = diagnoser.update(data['vmstat'], data['meminfo'], data['top'],
                                    result, THRESHOLDS, exclude=("stress",))
+            app_now = app.read() if app else None
+            if app_now:
+                app_now["verdict"] = app_verdict(app_now, why["memory"], THRESHOLDS)
 
             payload = {
                 "hostname": HOSTNAME,
@@ -295,6 +304,8 @@ def main():
                 # The likely cause of any pressure, a growing process, and the
                 # biggest users. The server keeps it only on the latest sample.
                 "diagnosis": {k: why[k] for k in ("cause", "leak", "top", "rates")},
+                # One app's own pressure and memory, if SYSHEALTH_APP names it.
+                "app": app_now,
             }
             push_to_server(payload)
             time.sleep(5)

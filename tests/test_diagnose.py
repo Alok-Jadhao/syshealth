@@ -68,6 +68,11 @@ class CauseTest(unittest.TestCase):
         cause = self.classify({"workingset_refault_file": mb_s(3)}, meminfo(anon_mb=500, cached_mb=1300))
         self.assertEqual(cause["key"], "cache")
 
+    def test_pressure_with_plenty_available_is_a_limit(self):
+        cause = self.classify({"pswpin": mb_s(5)}, meminfo(total_gb=8, avail_mb=5000, anon_mb=2000))
+        self.assertEqual(cause["key"], "limit")
+        self.assertIn("4.9 GB available", cause["text"])
+
     def test_reclaim_and_unclear(self):
         self.assertEqual(self.classify({"pgscan_direct": 500}, meminfo())["key"], "reclaim")
         self.assertEqual(self.classify({}, meminfo())["key"], "unclear")
@@ -184,6 +189,63 @@ class UsageRuleTest(unittest.TestCase):
         self.assertEqual(rightsize.used_at(full, 1000), 85.0)  # already over at 200
         roomy = {"levels": [{"mb": 2000, "killed": False, "used_pct": 30.0}]}
         self.assertEqual(rightsize.used_at(roomy, 1000), 30.0)  # still under at 2000
+
+
+class AppTest(unittest.TestCase):
+
+    def make_group(self, root, rel, some="12.50", current=480, limit="max", oom=0):
+        path = os.path.join(root, rel)
+        os.makedirs(path)
+        files = {
+            "memory.pressure": "some avg10=%s avg60=1.00 avg300=0.50 total=1\n"
+                               "full avg10=3.00 avg60=0.10 avg300=0.05 total=1\n" % some,
+            "memory.current": "%d\n" % (current * 1024 * 1024),
+            "memory.max": "%s\n" % (limit if limit == "max" else int(limit) * 1024 * 1024),
+            "memory.stat": "anon %d\nfile %d\nkernel 0\n" % (400 * 1024 * 1024, 80 * 1024 * 1024),
+            "memory.events": "low 0\nhigh 0\nmax 3\noom 1\noom_kill %d\n" % oom,
+        }
+        for name, body in files.items():
+            with open(os.path.join(path, name), "w") as f:
+                f.write(body)
+        return path
+
+    def test_finds_a_unit_by_name_or_path(self):
+        import collector
+        with tempfile.TemporaryDirectory() as root:
+            path = self.make_group(root, "system.slice/myapp.service")
+            self.assertEqual(collector.resolve_cgroup("myapp", root), path)
+            self.assertEqual(collector.resolve_cgroup("myapp.service", root), path)
+            self.assertEqual(collector.resolve_cgroup("system.slice/myapp.service", root), path)
+            self.assertEqual(collector.resolve_cgroup(path, root), path)
+            self.assertIsNone(collector.resolve_cgroup("other.service", root))
+
+    def test_reads_pressure_memory_limit_and_kills(self):
+        import collector
+        with tempfile.TemporaryDirectory() as root:
+            self.make_group(root, "system.slice/myapp.service", limit=512, oom=2)
+            app = collector.AppCgroup("myapp", root).read()
+        self.assertEqual(app, {"name": "myapp", "psi": 12.5, "psi_full": 3.0, "current_mb": 480,
+                               "limit_mb": 512, "anon_mb": 400, "file_mb": 80, "oom_kills": 2})
+
+    def test_no_group_reads_nothing(self):
+        import collector
+        with tempfile.TemporaryDirectory() as root:
+            self.assertIsNone(collector.AppCgroup("gone", root).read())
+
+    def test_verdict_tells_its_own_limit_from_the_machine(self):
+        # Judged by what the machine has available, not by its pressure: the
+        # app's waits at its own limit count machine-wide too.
+        roomy = diagnose.breakdown(meminfo(total_gb=8, avail_mb=5000, anon_mb=2000))
+        short = diagnose.breakdown(meminfo(total_gb=8, avail_mb=300, anon_mb=7500))
+        app = {"name": "api", "psi": 30.0, "current_mb": 500, "limit_mb": 512}
+        self.assertEqual(diagnose.app_verdict(app, roomy, THRESHOLDS)["key"], "app_limit")
+        self.assertEqual(diagnose.app_verdict(app, short, THRESHOLDS)["key"], "app_limit_and_machine")
+        under = dict(app, current_mb=200)
+        verdict = diagnose.app_verdict(under, short, THRESHOLDS)
+        self.assertEqual(verdict["key"], "app_machine")
+        self.assertIn("well before its own 512 MB limit", verdict["text"])
+        self.assertEqual(diagnose.app_verdict(under, roomy, THRESHOLDS)["key"], "app_parent")
+        self.assertIsNone(diagnose.app_verdict(dict(app, psi=2.0), roomy, THRESHOLDS))
 
 
 if __name__ == "__main__":
