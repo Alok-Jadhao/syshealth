@@ -158,6 +158,7 @@
           <p class="rs-headline" id="rs-headline" aria-live="polite"></p>
           <p class="rs-detail" id="rs-detail"></p>
           <ul class="rs-lines" id="rs-lines"></ul>
+          <p class="rs-usage" id="rs-usage" hidden></p>
         </section>
 
         <figure class="rs-curve" id="rs-curve-wrap" hidden>
@@ -249,6 +250,25 @@
           </div>
         </div>
       </div>
+
+      <!-- Why: where the RAM is, who holds it, and the likely cause of any
+           pressure (diagnose.py, on the agent). One machine at a time. -->
+      <section class="card why" id="why" aria-labelledby="why-heading" hidden>
+        <div class="why-grid">
+          <div class="why-memory">
+            <h2 class="why-title" id="why-heading">Where the memory is</h2>
+            <div class="mem-bar" id="mem-bar" role="img"></div>
+            <ul class="mem-legend" id="mem-legend"></ul>
+            <p class="why-usage" id="why-usage"></p>
+          </div>
+          <div class="why-top">
+            <h3 class="why-title">Holding the most</h3>
+            <ol class="top-list" id="top-list"></ol>
+          </div>
+        </div>
+        <p class="why-callout" id="why-cause" data-kind="cause" hidden></p>
+        <p class="why-callout" id="why-leak" data-kind="leak" hidden></p>
+      </section>
 
       <!-- Comparing instances there is no single headline number, so the
            hero gives way to one tile per machine. -->
@@ -345,6 +365,7 @@
                 <th scope="col" class="num">Now (10&nbsp;s)</th>
                 <th scope="col" class="num">Last minute</th>
                 <th scope="col" class="num">Whole machine</th>
+                <th scope="col" class="num">In use</th>
                 <th scope="col">State</th>
                 <th scope="col" class="num">Test load</th>
                 <th scope="col" class="num">Scanned &Delta;</th>

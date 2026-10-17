@@ -121,16 +121,25 @@ def series():
     now = time.time()
     payload = []
     for host, inst in instances.items():
+        samples = list(inst["history"])[-limit:]
         payload.append({
             "hostname": host,
             "instance_type": inst["instance_type"],
             "instance_id": inst["instance_id"],
             "online": (now - inst["last_seen"]) <= ONLINE_WINDOW_SEC,
             "seconds_since": round(now - inst["last_seen"], 1),
-            "samples": list(inst["history"])[-limit:],
+            # The diagnosis only ever describes "now", and is the bulk of a
+            # sample: the page polls an hour of history every 5 s.
+            "samples": [_without(s, "diagnosis") for s in samples[:-1]] + samples[-1:],
         })
     payload.sort(key=by_size)
     return jsonify({"instances": payload})
+
+
+def _without(sample, key):
+    if key not in sample:
+        return sample
+    return {k: v for k, v in sample.items() if k != key}
 
 
 def snapshot():

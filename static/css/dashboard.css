@@ -36,6 +36,12 @@
   --load-track: #52514e;
   --load-track-ink: #ffffff;
 
+  /* Where the memory is: one neutral ramp, darkest for what programs hold,
+     so it never reads as a size or a status. Free is the empty track. */
+  --mem-programs: #52514e;
+  --mem-cache: #a3a29a;
+  --mem-other: #d6d5ce;
+
   /* Status scale: reserved meaning, never reused for a series. */
   --status-good: #0ca30c;
   --status-warning: #fab219;
@@ -72,11 +78,19 @@
 
     --load-track: #c3c2b7;
     --load-track-ink: #0b0b0b;
+
+    --mem-programs: #d6d5ce;
+    --mem-cache: #898781;
+    --mem-other: #4a4a46;
   }
 }
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+
+  --mem-programs: #d6d5ce;
+  --mem-cache: #898781;
+  --mem-other: #4a4a46;
 
   --plane: #0d0d0d;
   --surface-1: #1a1a19;
@@ -611,6 +625,161 @@ main {
   margin: 4px 0 0;
   color: var(--text-muted);
   font-size: 11px;
+}
+
+/* ---------- where the memory is ---------- */
+
+.why {
+  margin-top: 16px;
+  padding: 16px 20px;
+}
+
+.why-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: 16px 28px;
+}
+
+@media (max-width: 860px) {
+  .why-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.why-title {
+  margin: 0 0 10px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mem-bar {
+  display: flex;
+  height: 14px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--plane);
+}
+
+.mem-seg {
+  display: block;
+  height: 100%;
+}
+
+.mem-seg + .mem-seg {
+  box-shadow: inset 1px 0 0 var(--surface-1);
+}
+
+.mem-seg[data-part="programs_mb"],
+.mem-key[data-part="programs_mb"] {
+  background: var(--mem-programs);
+}
+
+.mem-seg[data-part="cache_mb"],
+.mem-key[data-part="cache_mb"] {
+  background: var(--mem-cache);
+}
+
+.mem-seg[data-part="other_mb"],
+.mem-key[data-part="other_mb"] {
+  background: var(--mem-other);
+}
+
+.mem-seg[data-part="free_mb"] {
+  background: transparent;
+}
+
+.mem-key[data-part="free_mb"] {
+  background: var(--plane);
+  box-shadow: inset 0 0 0 1px var(--axis);
+}
+
+.mem-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.mem-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mem-key {
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+.why-usage {
+  margin: 10px 0 0;
+  max-width: 70ch;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.top-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+}
+
+.top-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.top-name {
+  overflow: hidden;
+  font-family: var(--mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-mb {
+  flex: none;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.top-empty {
+  color: var(--text-muted);
+}
+
+.why-callout {
+  margin: 14px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--status-warning);
+  border-radius: 4px;
+  background: var(--hover-wash);
+  font-size: 13px;
+}
+
+.why-callout[data-kind="leak"] {
+  border-left-color: var(--status-critical);
+}
+
+.rs-usage {
+  margin: 6px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
 }
 
 /* ---------- comparison tiles ---------- */

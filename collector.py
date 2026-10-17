@@ -1,5 +1,12 @@
 import os
 
+import diagnose
+
+# /proc/meminfo fields diagnose.breakdown() reads, in kB.
+MEMINFO_FIELDS = ("MemTotal", "MemFree", "MemAvailable", "Buffers", "Cached",
+                  "AnonPages", "Shmem", "SwapTotal", "SwapFree")
+
+
 class Collector:
     def __init__(self):
         self.psi_path = '/proc/pressure/memory'
@@ -10,7 +17,9 @@ class Collector:
         return {
             'psi': some,
             'psi_full': full,
-            'vmstat': self.read_vmstat()
+            'vmstat': self.read_vmstat(),
+            'meminfo': self.read_meminfo(),
+            'top': diagnose.top_processes(),
         }
 
     def read_psi(self):
@@ -47,14 +56,30 @@ class Collector:
             pass
         return None
 
+    def read_meminfo(self):
+        """The /proc/meminfo fields diagnose.py needs, in kB."""
+        values = {}
+        try:
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    key, _, rest = line.partition(':')
+                    if key in MEMINFO_FIELDS:
+                        values[key] = int(rest.split()[0])
+        except (FileNotFoundError, IndexError, ValueError):
+            pass
+        return values
+
     def read_vmstat(self):
+        # pgscan/pgsteal are always present, so the analyser can rely on them;
+        # the rest are whatever this kernel has (diagnose.COUNTERS).
         metrics = {'pgscan_direct': 0, 'pgsteal_direct': 0}
+        wanted = set(diagnose.COUNTERS)
         try:
             with open(self.vmstat_path, 'r') as f:
                 for line in f:
                     parts = line.split()
-                    if parts[0] in metrics:
+                    if parts and parts[0] in wanted:
                         metrics[parts[0]] = int(parts[1])
             return metrics
-        except FileNotFoundError:
+        except (FileNotFoundError, IndexError, ValueError):
             return metrics

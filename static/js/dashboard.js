@@ -178,7 +178,12 @@
       reason: typeof raw.reason === 'string' ? raw.reason : '',
       thresholds: normalizeThresholds(raw.thresholds),
       memMb: num(raw.mem_total_mb),
-      test: normalizeTest(raw.load_test)
+      test: normalizeTest(raw.load_test),
+      memory: raw.memory && typeof raw.memory === 'object' && num(raw.memory.total_mb)
+        ? raw.memory
+        : null,
+      // Only the newest sample of each instance carries it (server.py).
+      diagnosis: raw.diagnosis && typeof raw.diagnosis === 'object' ? raw.diagnosis : null
     };
   }
 
@@ -1442,6 +1447,12 @@
           action: 'Watch it.'
         };
       }
+      // The likely cause, when the agent found one, says what to do better
+      // than the state alone can.
+      var cause = latest.diagnosis && latest.diagnosis.cause;
+      if (cause && cause.action && key !== 'healthy') {
+        said.action = cause.action;
+      }
       $('#hero-meaning').textContent = (describeWait(minute) + ' ' + said.meaning).trim();
       $('#hero-action').textContent = said.action ? 'What to do: ' + said.action : '';
       // The analyser's own words, only where they add something the lines
@@ -1469,6 +1480,78 @@
       ? testProgress(test, latest) || 'Running'
       : 'No test running';
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
+    renderWhy(latest);
+  }
+
+  var MEM_PARTS = [
+    ['programs_mb', 'Programs', 'Memory programs asked for themselves'],
+    ['cache_mb', 'File cache', 'Copies of files on disk; the kernel can drop these'],
+    ['other_mb', 'Kernel and other', 'The kernel itself, shared memory and tmpfs'],
+    ['free_mb', 'Free', 'Not used for anything']
+  ];
+
+  // Where the RAM is, who holds it, and why there is pressure, if there is.
+  function renderWhy(latest) {
+    var panel = $('#why');
+    var memory = latest && latest.memory;
+    panel.hidden = !memory;
+    if (!memory) {
+      return;
+    }
+    var total = memory.total_mb || 1;
+
+    var bar = $('#mem-bar');
+    var legend = $('#mem-legend');
+    clear(bar);
+    clear(legend);
+    MEM_PARTS.forEach(function (part) {
+      var value = num(memory[part[0]]) || 0;
+      var seg = el('span', 'mem-seg');
+      seg.setAttribute('data-part', part[0]);
+      seg.style.width = (value / total * 100).toFixed(2) + '%';
+      seg.title = part[1] + ': ' + formatMb(value);
+      bar.appendChild(seg);
+
+      var item = el('li', 'mem-legend-item');
+      var key = el('span', 'mem-key');
+      key.setAttribute('data-part', part[0]);
+      item.appendChild(key);
+      item.appendChild(el('span', null, part[1] + ' '));
+      item.appendChild(el('strong', null, formatMb(value)));
+      item.title = part[2];
+      legend.appendChild(item);
+    });
+    bar.setAttribute('aria-label', MEM_PARTS.map(function (part) {
+      return part[1] + ' ' + formatMb(num(memory[part[0]]) || 0);
+    }).join(', ') + ', of ' + formatMb(total) + '.');
+
+    var swap = memory.swap_total_mb
+      ? formatMb(memory.swap_used_mb) + ' of ' + formatMb(memory.swap_total_mb) + ' swap in use.'
+      : 'No swap.';
+    $('#why-usage').textContent = formatPct(memory.used_pct) + '% in use, the figure most ' +
+      'dashboards alarm on. SysHealth goes by time spent waiting instead: a machine can be ' +
+      'nearly full and not slowed at all. ' + swap;
+
+    var list = $('#top-list');
+    clear(list);
+    var diagnosis = latest.diagnosis || {};
+    (diagnosis.top || []).forEach(function (proc) {
+      var item = el('li', 'top-item');
+      item.appendChild(el('span', 'top-name', proc.name));
+      item.appendChild(el('span', 'top-mb', formatMb(proc.rss_mb) + ' · ' +
+        Math.round(proc.rss_mb / total * 100) + '%'));
+      list.appendChild(item);
+    });
+    if (!list.firstChild) {
+      list.appendChild(el('li', 'top-item top-empty', 'Not reported by this agent.'));
+    }
+
+    var cause = diagnosis.cause;
+    $('#why-cause').hidden = !cause;
+    $('#why-cause').textContent = cause ? 'Likely cause: ' + cause.text : '';
+    var leak = diagnosis.leak;
+    $('#why-leak').hidden = !leak;
+    $('#why-leak').textContent = leak ? 'Still growing: ' + leak.text : '';
   }
 
   function renderCompareSummary(scoped) {
@@ -1517,6 +1600,9 @@
       tile.appendChild(stateRow);
 
       var note = 'now ' + formatPct(latest.psi) + '% · peak ' + formatPct(peak) + '% in range';
+      if (latest.memory) {
+        note += ' · ' + formatPct(latest.memory.used_pct) + '% in use';
+      }
       if (!inst.online && inst.secondsSince !== null) {
         note += ' · last seen ' + formatAgo(inst.secondsSince * 1000);
       }
@@ -1573,6 +1659,7 @@
       cell(formatPct(sample.psi) + '%', 'num');
       cell(formatPct(sample.avgPsi) + '%', 'num');
       cell(sample.psiFull === null ? '—' : formatPct(sample.psiFull) + '%', 'num');
+      cell(sample.memory ? formatPct(sample.memory.used_pct) + '%' : '—', 'num');
 
       var stateTd = document.createElement('td');
       var stateWrap = el('span', 'state-cell');
@@ -1657,6 +1744,9 @@
 
     $('#overview-single').hidden = multi;
     $('#overview-compare').hidden = !multi;
+    if (multi) {
+      $('#why').hidden = true;
+    }
 
     if (multi) {
       renderCompareSummary(scoped);
@@ -2222,6 +2312,10 @@
     (rec && !state.reportError ? rec.lines : []).forEach(function (line) {
       lines.appendChild(el('li', null, line));
     });
+    var usage = rec && !state.reportError ? rec.usage_rule : null;
+    $('#rs-usage').hidden = !usage;
+    $('#rs-usage').textContent = usage ? usage.text : '';
+    $('#rs-usage').setAttribute('data-agrees', usage && usage.agrees ? 'true' : 'false');
 
     Array.prototype.forEach.call(box.querySelectorAll('th[data-variable]'), function (th) {
       th.hidden = !variable;

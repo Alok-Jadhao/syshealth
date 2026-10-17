@@ -12,6 +12,7 @@ import instance
 import loadtest
 from collector import Collector
 from analyzer import Analyzer, THRESHOLDS
+from diagnose import Diagnoser
 from reporter import Reporter
 
 HOSTNAME = socket.gethostname()
@@ -247,6 +248,7 @@ def main():
 
     collector = Collector()
     analyzer = Analyzer()
+    diagnoser = Diagnoser()
     reporter = Reporter()
     identity = instance.detect()
     mem_total_mb = collector.read_mem_total_mb()
@@ -262,6 +264,11 @@ def main():
             reporter.log_status(result['state'], data['psi'], result['avg_psi'],
                                 result['pgscan_delta'], result['pgsteal_delta'],
                                 result['reason'], data['psi_full'])
+
+            # Why, as well as how much. The test's own stress process is
+            # meant to grow, so it is never reported as a leak.
+            why = diagnoser.update(data['vmstat'], data['meminfo'], data['top'],
+                                   result, THRESHOLDS, exclude=("stress",))
 
             payload = {
                 "hostname": HOSTNAME,
@@ -280,6 +287,12 @@ def main():
                 "baseline": analyzer.baseline,
                 # The load this box is under right now, if a test is running.
                 "load_test": runner.status(),
+                # Where the RAM is (programs, cache, free, swap) and how much
+                # of it is "in use" the way most dashboards count it.
+                "memory": why["memory"],
+                # The likely cause of any pressure, a growing process, and the
+                # biggest users. The server keeps it only on the latest sample.
+                "diagnosis": {k: why[k] for k in ("cause", "leak", "top", "rates")},
             }
             push_to_server(payload)
             time.sleep(5)

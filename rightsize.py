@@ -27,6 +27,11 @@ TRAIL_SEC = 60     # states are judged on a minute, so they trail the load
 DEFAULT_MARGIN_PCT = 25
 MAX_MARGIN_PCT = 200
 
+# The rule SysHealth is set against: judge a size by how much of its memory is
+# "in use" (MemTotal - MemAvailable, what `free` and most dashboards show) and
+# alarm at 80%, a common default for memory alarms.
+USAGE_ALARM_PCT = 80
+
 STATE_RANK = {"UNKNOWN": 0, "HEALTHY": 1, "DEGRADED": 2, "CRITICAL": 3}
 RANK_KEY = ["unknown", "healthy", "degraded", "critical"]
 
@@ -121,15 +126,21 @@ def levels_of(during, th):
         settled = [s for s in samples if _ts(s) >= first + SETTLE_SEC] or samples
         some = sum(_num(s.get("psi"), 0.0) for s in settled) / len(settled)
         full = sum(_num(s.get("psi_full"), 0.0) for s in settled) / len(settled)
+        used = [_num((s.get("memory") or {}).get("used_pct")) for s in settled]
+        used = [u for u in used if u is not None]
         killed_here = max(int(_num(_test(s).get("stress_killed"), 0)) for s in samples)
         killed = killed_here > killed_before
         killed_before = max(killed_before, killed_here)
 
         mb = int(_num(_test(samples[0]).get("load_mb"), 0))
-        level = levels.setdefault(mb, {"mb": mb, "some": 0.0, "full": 0.0, "killed": False})
+        level = levels.setdefault(mb, {"mb": mb, "some": 0.0, "full": 0.0, "killed": False,
+                                       "used_pct": None})
         level["some"] = max(level["some"], some)
         level["full"] = max(level["full"], full)
         level["killed"] = level["killed"] or killed
+        if used:
+            # "In use" as most dashboards count it, for the usage-rule comparison.
+            level["used_pct"] = round(max(level["used_pct"] or 0, sum(used) / len(used)), 1)
 
     out = sorted(levels.values(), key=lambda lv: lv["mb"])
     for level in out:
@@ -399,6 +410,77 @@ def recommend(rows, need_mb, margin_pct):
     return out
 
 
+def at_need(row, need_mb):
+    """The load level that stands for the app's need: the highest at or below
+    it, so a size is judged on the load it would really carry."""
+    below = [lv for lv in row["levels"] if lv["mb"] <= need_mb]
+    return max(below, key=lambda lv: lv["mb"]) if below else None
+
+
+def used_at(row, need_mb):
+    """Memory in use at the app's need, as most dashboards count it. A level
+    where the kernel killed the test ran out of memory: 100%."""
+    level = at_need(row, need_mb)
+    if level is None:
+        return None
+    if level["killed"]:
+        return 100.0
+    return level.get("used_pct")
+
+
+def usage_rule(rows, need_mb, pick):
+    """What a "memory over 80% in use" alarm would have chosen, beside our pick.
+
+    Said either way. Where the two agree, that is worth knowing too; where
+    they differ, the difference is the case for measuring waiting, not use.
+    """
+    judged = [r for r in rows if r.get("used_at_need") is not None]
+    ours = next((r for r in judged if r["hostname"] == pick), None)
+    if not ours:
+        return None
+
+    def cost(row):
+        return (_month(row) if _month(row) is not None else float("inf"),
+                row.get("mem_total_mb") or float("inf"))
+
+    def waited(row):
+        level = at_need(row, need_mb)
+        return "%.1f%%" % level["some"] if level["some"] >= 1 else "under 1%"
+
+    rule = "a usage alarm (memory over %d%% in use)" % USAGE_ALARM_PCT
+    passing = sorted((r for r in judged if r["used_at_need"] < USAGE_ALARM_PCT), key=cost)
+    if not passing:
+        return {"pick": None, "agrees": False,
+                "text": "Judged by memory in use, every size tested would trip %s at your app's "
+                        "peak, including %s, whose programs waited for memory %s of the time."
+                        % (rule, ours["instance_type"], waited(ours))}
+    theirs = passing[0]
+    if theirs["hostname"] == pick:
+        return {"pick": pick, "agrees": True,
+                "text": "Judged by memory in use, %s would pick the same size: %s is %d%% in "
+                        "use at your app's peak." % (rule, ours["instance_type"],
+                                                     int(round(ours["used_at_need"])))}
+
+    diff = None
+    if _month(theirs) is not None and _month(ours) is not None:
+        diff = _exact_month(theirs) - _exact_month(ours)
+    if cost(theirs) > cost(ours):
+        # The rule over-buys: ours looks full, but nothing is waiting.
+        text = ("Judged by memory in use, %s would pick %s instead%s: %s is %d%% in use at your "
+                "app's peak, yet its programs waited for memory %s of the time."
+                % (rule, theirs["instance_type"],
+                   ", %s a month more" % _money(diff) if diff else "",
+                   ours["instance_type"], int(round(ours["used_at_need"])), waited(ours)))
+    else:
+        # The rule under-buys: theirs looks roomy, but programs are waiting.
+        text = ("Judged by memory in use, %s would pick %s%s, but at your app's peak its "
+                "programs waited for memory %s of the time, with only %d%% in use."
+                % (rule, theirs["instance_type"],
+                   ", %s a month less" % _money(-diff) if diff else "",
+                   waited(theirs), int(round(theirs["used_at_need"]))))
+    return {"pick": theirs["hostname"], "agrees": False, "text": text}
+
+
 def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
     """Everything the dashboard's results panel and GET /report show."""
     test_id = test_id or latest_test_id(snapshot)
@@ -427,6 +509,7 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
     for row in rows:
         row["fit"] = fit(row["capacity"], need, required) if need else "untested"
         row["spare_pct"] = spare_pct(row["capacity"], need)
+        row["used_at_need"] = used_at(row, need) if need else None
         key, text = _outcome(row, row["running"], variable)
         row["outcome"] = {"key": key, "text": text}
 
@@ -436,6 +519,8 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None):
                              "the load by up to a minute.", "lines": []}
     elif need:
         verdict = recommend(rows, need, margin)
+        if verdict and verdict.get("pick"):
+            verdict["usage_rule"] = usage_rule(rows, need, verdict["pick"])
     else:
         verdict = None
 

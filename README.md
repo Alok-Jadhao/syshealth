@@ -21,6 +21,8 @@ monitor cannot, because a monitor only observes:
 | Knows what load caused a reading | No | Yes, every sample carries the test step |
 | How much memory each size can hold before your app slows down | No | Yes, from the pressure at each load level |
 | Which size to buy, and what it costs | No | Yes: the cheapest size that fits, priced, with what the others would cost |
+| Why a machine is under pressure | Raw counters; you work it out | The likely cause in words (swapping, programs filling RAM, files re-read from disk), who holds the memory, and any process that only grows |
+| Compares itself with a usage alarm | No | Yes: what "alarm at 80% in use" would have bought instead, and why it would be wrong when it is |
 | Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
 
 ---
@@ -64,6 +66,11 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
 - **⚡ Load test** — a form for the load your app actually has, run on every
   online instance at the same moment ([below](#load-tests)). The test's load is
   drawn as a track above the graph, so pressure lines up with what caused it
+- **Where the memory is** — for one machine: programs, file cache, the
+  kernel and free, how much is "in use" the way most dashboards count it, the
+  processes holding the most, the **likely cause** of any pressure, and a
+  warning for a process that has only grown for minutes, with when the
+  machine would run out at that rate ([below](#why-the-likely-cause))
 - **Which size to choose** — after a test, the cheapest size that holds your
   app's peak with the room to spare you ask for, priced per month, with a chart
   of pressure against load that shows where each size gives out
@@ -346,6 +353,11 @@ server from the samples the agents already send, so the dashboard and
    what the alternatives would mean: "t3.small would save $15.18 a month, but it
    holds only about 1.4 GB before slowing down."
 
+The report also says what a usage alarm (memory over 80% in use, the
+usual way) would have bought instead. When the two agree, that is said too.
+When they differ, it gives the evidence: "t3.small is 88% in use at your app's
+peak, yet its programs waited for memory under 1% of the time."
+
 Your app's peak is asked for on the form (for a peak test it is the memory
 held), and it and the margin can be changed afterwards on the panel, or with
 `?need_mb=` and `?margin=`: no need to run the test again.
@@ -360,6 +372,30 @@ Agents off EC2 can set `SYSHEALTH_INSTANCE_TYPE` and `SYSHEALTH_INSTANCE_REGION`
 
 ---
 
+## Why: the likely cause
+
+PSI says how much time programs lost waiting for memory, not why, and the fix
+depends on why. Each agent reads the kernel's own evidence (`/proc/meminfo`,
+`/proc/vmstat`, `/proc/<pid>/status`) and `diagnose.py` turns it into words:
+
+| Cause | Evidence | What to do |
+|---|---|---|
+| Swapping | Memory read back from swap, 1 MB/s or more | A size with more RAM; more swap only hides it |
+| Programs fill RAM | Recently dropped file pages read back from disk, 1 MB/s or more, with programs holding 70%+ of RAM | A size with more RAM, or make the app hold less |
+| Files do not fit | The same re-reading, while programs hold less | More RAM for the cache, or read fewer files at once |
+| Reclaim | Programs stopping to free memory before they can get more | If it lasts, more RAM |
+
+A cause is given only while there is pressure to explain. Separately, a process
+whose memory has only grown for five minutes or more, by 100 MB and 20% at
+least, is called out with the time until the machine would run out at that
+rate. The load test's own `stress` is never counted.
+
+No swap is the default on EC2, so on a stock instance the second row is the
+usual one: programs fill RAM, and the kernel keeps dropping and re-reading the
+files they run from.
+
+---
+
 ## Project Structure
 
 ```
@@ -367,9 +403,10 @@ syshealth/
 ├── server.py          # Flask central server + REST API
 ├── syshealth.py       # Agent: collector, analyzer, control server, push client
 ├── analyzer.py        # Sliding-window PSI classifier, thresholds at the top
-├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, MemTotal
+├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, /proc/meminfo
 ├── loadtest.py        # Load-test plans: built from the form, checked by the agent
 ├── rightsize.py       # What a test says each size holds, and which size to buy
+├── diagnose.py        # Where the memory is, the likely cause, growing processes
 ├── pricing.py         # What each size costs, from data/prices.json
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging

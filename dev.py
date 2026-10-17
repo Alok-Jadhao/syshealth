@@ -28,6 +28,7 @@ try:
     import loadtest
     import server
     from analyzer import Analyzer, THRESHOLDS
+    from diagnose import Diagnoser
 except ModuleNotFoundError as exc:
     # Ubuntu refuses `pip install` into the system Python (PEP 668), so the
     # obvious next move fails too. Say what does work instead of leaving a
@@ -95,6 +96,15 @@ DEMO_TEST = {"mode": "variable", "pattern": "ramp", "low_mb": 200,
              "need_mb": 1600}
 DEMO_TEST_ENDS_AGO = 240.0
 
+# What the simulated machines are running when nothing is being tested: the
+# agent and the usual Ubuntu-on-EC2 residents, in MB. The background story's
+# load belongs to "node server.js", a stand-in for the app.
+BASE_PROCESSES = [("python3 syshealth.py", 31), ("snapd", 24), ("amazon-ssm-agent", 21),
+                  ("multipathd", 18), ("systemd-journald", 14)]
+APP_PROCESS = "node server.js"
+KERNEL_MB = 110        # slab, page tables and the rest of the kernel's own use
+IDLE_CACHE_SHARE = 0.4  # file cache on an idle box, as a share of RAM
+
 # On a real t3.micro the OOM killer ends a stress run that does not fit. Past
 # this multiple of free memory, the simulated one is killed too.
 OOM_RATIO = 2.0
@@ -120,7 +130,10 @@ class FakeMachine:
 
         self.pgscan = 1000 * (index + 1)
         self.pgsteal = 900 * (index + 1)
+        self.refaults = 5000 * (index + 1)
+        self.majfaults = 3000 * (index + 1)
         self.rng = random.Random(1234 + index)
+        self.diagnoser = Diagnoser()
 
         # A load test started from the dashboard: {"id", "plan", "started"}.
         self.test = None
@@ -196,6 +209,39 @@ class FakeMachine:
         full = some * min(0.85, max(0.0, (ratio - 0.95) / 1.5))
         return some, full
 
+    def memory_for(self, demand_mb, held_by):
+        """Synthetic /proc/meminfo (kB) and top processes for holding `demand_mb`.
+
+        No swap, as on a stock EC2 instance: once programs fill RAM, the cache
+        is squeezed to almost nothing and the kernel has nowhere else to go.
+        """
+        total = self.mem_total_mb
+        base = sum(rss for _, rss in BASE_PROCESSES)
+        programs = min(base + demand_mb, total - KERNEL_MB - 30)
+        free_floor = int(total * 0.03)
+        cache = max(25, min(int(total * IDLE_CACHE_SHARE), total - programs - KERNEL_MB - free_floor))
+        free = max(10, total - programs - KERNEL_MB - cache)
+        kb = 1024
+        meminfo = {
+            "MemTotal": total * kb, "MemFree": free * kb,
+            "MemAvailable": int((free + cache * 0.9) * kb),
+            "Buffers": 8 * kb, "Cached": (cache - 8 + 2) * kb, "Shmem": 2 * kb,
+            "AnonPages": programs * kb, "SwapTotal": 0, "SwapFree": 0,
+        }
+        top = [{"pid": 900 + i, "name": name, "rss_mb": rss}
+               for i, (name, rss) in enumerate(BASE_PROCESSES)]
+        held = min(demand_mb, programs - base)
+        if held > 0:
+            if held_by == "stress":
+                # stress --vm splits the memory between its workers.
+                workers = (self.test or {}).get("plan", {}).get("workers", 2)
+                top += [{"pid": 4100 + w, "name": "stress", "rss_mb": int(held / workers)}
+                        for w in range(workers)]
+            else:
+                top.append({"pid": 3300, "name": APP_PROCESS, "rss_mb": int(held)})
+        top.sort(key=lambda p: p["rss_mb"], reverse=True)
+        return meminfo, top
+
     # ---- one sample ----
 
     def sample(self, ts):
@@ -204,7 +250,9 @@ class FakeMachine:
         # One read: a request thread may start or stop a test mid-sample.
         test = self.test
         current = self.test_phase(ts, test) if test else None
+        held_by = APP_PROCESS
         if current:
+            held_by = "stress"
             i, phase, into = current
             demand = phase["mb"]
             # Too big to fit: the kernel kills stress, and the demand - and
@@ -239,16 +287,23 @@ class FakeMachine:
         scans = int(some * self.rng.uniform(8, 22))
         self.pgscan += scans
         self.pgsteal += int(scans * self.rng.uniform(0.55, 0.85))
+        # With no swap, the pages the kernel can drop are file pages, so the
+        # stall shows up as files read back from disk: about 1.6 MB/s at 10%.
+        self.refaults += int(some * TICK_SEC * self.rng.uniform(30, 50))
+        self.majfaults += int(some * TICK_SEC * self.rng.uniform(5, 12))
+        vmstat = {"pgscan_direct": self.pgscan, "pgsteal_direct": self.pgsteal,
+                  "workingset_refault_anon": 0, "workingset_refault_file": self.refaults,
+                  "pgmajfault": self.majfaults, "pswpin": 0, "pswpout": 0}
+        meminfo, top = self.memory_for(demand, held_by)
 
         # Two decimal places, because that is all /proc/pressure/memory gives
         # the real collector.
         some = round(some, 2)
         full = round(full, 2)
 
-        result = self.analyzer.update(
-            some, full,
-            {"pgscan_direct": self.pgscan, "pgsteal_direct": self.pgsteal},
-        )
+        result = self.analyzer.update(some, full, vmstat)
+        why = self.diagnoser.update(vmstat, meminfo, top, result, THRESHOLDS,
+                                    now=ts, exclude=("stress",))
 
         payload = {
             "hostname": self.hostname,
@@ -262,6 +317,8 @@ class FakeMachine:
             "thresholds": THRESHOLDS,
             "baseline": self.analyzer.baseline,
             "load_test": status,
+            "memory": why["memory"],
+            "diagnosis": {k: why[k] for k in ("cause", "leak", "top", "rates")},
             "demo": True,
         }
         payload.update(result)

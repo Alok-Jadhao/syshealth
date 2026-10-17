@@ -11,7 +11,7 @@ SCP="scp -i $KEY -o StrictHostKeyChecking=no"
 deploy_agents() {
   echo ">> Deploying agent files..."
   for IP in $AGENTS; do
-    $SCP syshealth.py analyzer.py collector.py reporter.py instance.py loadtest.py ubuntu@$IP:~/ &
+    $SCP syshealth.py analyzer.py collector.py diagnose.py reporter.py instance.py loadtest.py ubuntu@$IP:~/ &
   done
   wait
 
