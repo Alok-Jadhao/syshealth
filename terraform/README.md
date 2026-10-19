@@ -4,17 +4,43 @@ One `terraform apply` brings up the whole thing: a dashboard server and
 `t3.micro`, `t3.small`, `t3.medium`, `t3.large`, each running the same agent and
 reporting in. Nothing to configure on the instances by hand.
 
-Defaults to `ap-south-1` (Mumbai). Override with `region` in `terraform.tfvars`,
-remembering that a key pair only exists in the region it was created in.
+Defaults to `ap-south-1` (Mumbai). Override with `region` in `terraform.tfvars`.
+
+## The easy way: `../aws.sh`
+
+```bash
+./aws.sh up --profile NAME     # from the repository root
+./aws.sh down
+```
+
+`aws.sh` runs this Terraform for you:
+- **Before building:** it shows the account, the region and the hourly cost,
+  and asks.
+- **Your address:** it finds it and puts it in `ssh_cidr`.
+- **SSH key:** it makes one (`~/.ssh/syshealth_ed25519`), and Terraform turns
+  its public half into a key pair that is destroyed with the fleet.
+- **Waiting:** it does not finish until every size is reporting.
+- **Workspace:** it uses its own Terraform workspace, `fleet`, so a fleet built
+  by hand in this directory is never touched.
+- **Account:** it records the account it built in, and `down` refuses to act
+  from any other. Otherwise a stale `AWS_PROFILE` could make Terraform believe
+  the instances were gone while they kept billing.
+
+`./aws.sh status`, `test` and `ssh` cover the rest ([README](../README.md#run-it-on-aws-one-command-up-one-down)).
+The rest of this page is the plain-Terraform route underneath it.
 
 ## What you need
 
-- An EC2 key pair **in the target region**. Key pairs are per region, so a name
-  that works in one is absent in another; the config looks yours up and fails at
-  `plan` if it is missing, rather than part way through `apply`.
 - AWS credentials with EC2 permissions (`AmazonEC2FullAccess` covers it).
   Terraform reads them the usual ways — `AWS_PROFILE`, env vars, or
   `~/.aws/credentials`.
+- For SSH, one of:
+  - `key_name`: an EC2 key pair of yours, which must exist **in the target
+    region**, since key pairs are per region. The config looks it up and fails
+    at `plan` if it is missing, rather than part way through `apply`.
+  - `ssh_public_key`: a public key, from which a key pair is made. This is what
+    `aws.sh` uses.
+  - Neither: no SSH, and everything else still works.
 
 That is all. The agents find the server over the VPC's private network, so
 there is no address to write down.
@@ -28,7 +54,7 @@ cd terraform
 # -4 matters: many ISPs answer with an IPv6 address by default, and the
 # security group rules are IPv4.
 cat > terraform.tfvars <<EOF
-key_name = "my-keypair"
+key_name = "my-keypair"           # or: ssh_public_key = "ssh-ed25519 AAAA..."
 ssh_cidr = "$(curl -4 -s ifconfig.me)/32"
 EOF
 
@@ -72,11 +98,13 @@ destroys the fleet, including when the test fails or you press Ctrl-C:
 ./rightsize.sh --peak 1600 --for 120 --types "t3.small t3a.medium m7i.large"
 ```
 
-It needs the same credentials and `terraform.tfvars` (`key_name`) as above, and
-hands the fleet's token to `cli.py` itself. It says what it will create and roughly what that costs an hour, and asks before
-going ahead (`--yes` skips the question). It works in its own Terraform
+It needs only credentials (`AWS_PROFILE=NAME ./rightsize.sh ...` picks a
+profile). It makes its SSH key pair the way `aws.sh` does, unless
+`terraform.tfvars` names one, and it hands the fleet's token to `cli.py` itself.
+It says what it will create and roughly what that costs an hour, and asks
+before going ahead (`--yes` skips the question). It works in its own Terraform
 workspace, `rightsize`, with resource names starting `syshealth-rs`, so it never
-touches a fleet you built with `terraform apply`. It opens the security group to
+touches a fleet you built with `terraform apply` or `aws.sh`. It opens the security group to
 this machine's current address only. `--keep` leaves the fleet up afterwards.
 The exit status is `cli.py`'s: 0 when a size was recommended, 2 when none fits,
 3 when `--expect TYPE` named another size.
@@ -90,7 +118,8 @@ page](https://aws.amazon.com/ec2/pricing/on-demand/) for your region rather than
 trusting that number.
 
 ```bash
-terraform destroy
+../aws.sh down          # a fleet from aws.sh; ../aws.sh status shows the cost so far
+terraform destroy       # a fleet from terraform apply
 ```
 
 ## Design notes
@@ -163,8 +192,9 @@ instance needs a change beyond this config — enabling IPv6 on the VPC, subnet 
 instances, or connecting from somewhere with IPv4.
 
 Your address also changes when your network does, at which point the dashboard
-stops loading. Rewrite `terraform.tfvars` and `apply` again; only the security
-group rules change, and the instances are left alone.
+stops loading. With `aws.sh`, run `./aws.sh up` again. By hand, rewrite
+`terraform.tfvars` and `apply` again. Either way, only the security group rules
+change and the instances are left alone.
 
 **`InsufficientInstanceCapacity`** — AWS has no capacity for that instance type
 in that availability zone right now. Nothing in this config causes it and

@@ -22,8 +22,23 @@ variable "server_instance_type" {
 }
 
 variable "key_name" {
-  description = "Name of an existing EC2 key pair in this region, used for SSH."
+  description = <<-EOT
+    Name of an existing EC2 key pair in this region, used for SSH. Leave it out
+    to have one made from ssh_public_key instead, which is what ../aws.sh does.
+  EOT
   type        = string
+  default     = null
+}
+
+variable "ssh_public_key" {
+  description = <<-EOT
+    An OpenSSH public key, one line. When key_name is not set, a key pair named
+    <name_prefix>-key is made from it in the region and destroyed with the
+    fleet. With neither set the instances have no key: they still work, but
+    there is no SSH. ../aws.sh passes ~/.ssh/syshealth_ed25519.pub.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "ssh_cidr" {

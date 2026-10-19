@@ -27,7 +27,7 @@ jobs:
         run: |
           python -m py_compile *.py tools/*.py docs/*.py
           node --check static/js/dashboard.js
-          bash -n deploy.sh terraform/*.sh
+          bash -n aws.sh deploy.sh terraform/*.sh
 
   terraform:
     runs-on: ubuntu-24.04

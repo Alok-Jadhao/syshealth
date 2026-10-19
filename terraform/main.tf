@@ -73,7 +73,26 @@ data "aws_subnets" "default" {
 # easy mistake. Looking it up fails at plan time with "no matching EC2 Key Pair
 # found" instead of part way through apply, once instances already exist.
 data "aws_key_pair" "ssh" {
+  count    = var.key_name != null ? 1 : 0
   key_name = var.key_name
+}
+
+# Without a key pair of your own, one is made from a public key you pass, and
+# goes when the fleet does. The private half never leaves your machine, so it
+# is not in the state either.
+resource "aws_key_pair" "generated" {
+  count      = var.key_name == null && var.ssh_public_key != null ? 1 : 0
+  key_name   = "${var.name_prefix}-key"
+  public_key = var.ssh_public_key
+
+  tags = merge(local.common_tags, { Name = "${var.name_prefix}-key" })
+}
+
+locals {
+  key_name = (
+    var.key_name != null ? data.aws_key_pair.ssh[0].key_name :
+    length(aws_key_pair.generated) > 0 ? aws_key_pair.generated[0].key_name : null
+  )
 }
 
 # Ubuntu, because PSI is compiled in and enabled by default. On Amazon Linux
@@ -195,7 +214,7 @@ resource "aws_instance" "server" {
   instance_type          = var.server_instance_type
   subnet_id              = local.subnet_ids[0]
   vpc_security_group_ids = [aws_security_group.server.id]
-  key_name               = data.aws_key_pair.ssh.key_name
+  key_name               = local.key_name
 
   # Stated rather than inherited from the subnet's map_public_ip_on_launch.
   # Accounts do turn that off, and then there is no address to open the
@@ -245,7 +264,7 @@ resource "aws_instance" "agent" {
   # transfer.
   subnet_id              = local.subnet_ids[each.value.index % length(local.subnet_ids)]
   vpc_security_group_ids = [aws_security_group.agent.id]
-  key_name               = data.aws_key_pair.ssh.key_name
+  key_name               = local.key_name
 
   # As above: the agents need a route out to clone the repo and install
   # packages, and an address you can SSH to when one of them misbehaves.

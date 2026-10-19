@@ -11,6 +11,11 @@ baseline.json
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
+# Workspaces: aws.sh's fleet and rightsize.sh's (state holds the fleet's token).
+terraform/terraform.tfstate.d/
+# What aws.sh up built with, and the fleet's SSH host keys.
+terraform/.aws-fleet
+terraform/.aws-fleet-known_hosts
 terraform/*.tfvars
 terraform/*.tfvars.bak
 terraform/.relaunch.plan

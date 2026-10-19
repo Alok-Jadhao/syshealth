@@ -143,27 +143,39 @@ load-test results come out of the same code that runs in production.
 
 ---
 
-## Provision the real thing
+## Run it on AWS: one command up, one down
 
-There is Terraform for the dashboard plus one instance of each size. Two
-variables to set, one command to run:
+You need AWS credentials (`aws configure`, or `aws configure --profile NAME`)
+and Terraform. Then:
 
 ```bash
-cd terraform
-
-# -4 matters: many ISPs answer with IPv6 by default, and the rules are IPv4.
-cat > terraform.tfvars <<EOF
-key_name = "your-keypair"
-ssh_cidr = "$(curl -4 -s ifconfig.me)/32"
-EOF
-
-terraform init && terraform apply
+./aws.sh up --profile NAME    # the dashboard and t3.micro/small/medium/large
+./aws.sh down                 # destroy all of it
 ```
 
-Everything installs and starts itself; open the `dashboard_url` output. Give it
-two to three minutes, and run `./check.sh` to see which sizes are reporting and
-which are not. See [`terraform/README.md`](terraform/README.md) for costs, design
-notes and `terraform destroy`.
+`up` first says which account and region it will use and what that costs
+(about $0.19 an hour in Mumbai, the default region), and asks before going on.
+It builds the fleet, waits until every size is reporting (about three minutes),
+and prints the dashboard's address and token. There is nothing to prepare by
+hand:
+- **SSH key:** it makes one at `~/.ssh/syshealth_ed25519`.
+- **Firewall:** it lets in only this machine's address.
+- **Account:** it remembers which account it built in, and `down` refuses to
+  run against any other.
+
+While it is up:
+
+```bash
+./aws.sh status               # what is running, since when, what it has cost
+./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # which size to buy
+./aws.sh ssh t3.small         # a shell on one machine (or: dashboard)
+```
+
+`--region` and `--types "t3.small m7i.large"` change where it runs and which
+sizes. If you move to another network, run `up` again: it moves the firewall to
+your new address.
+[`terraform/README.md`](terraform/README.md) has the plain-Terraform route,
+costs and design notes.
 
 ---
 
@@ -430,6 +442,8 @@ outgrown the size it is deployed on. Ctrl-C stops the test everywhere.
 `--dry-run` checks a test without running it. The server is `--server`,
 `$SYSHEALTH_URL`, or `http://127.0.0.1:5000`; its token goes in
 `$SYSHEALTH_TOKEN` (an environment variable, so it stays out of shell history).
+On a fleet from `./aws.sh up`, `./aws.sh test ...` runs it with the address and
+token filled in, and saves the report.
 
 **The whole experiment in one command.** `terraform/rightsize.sh` builds a fleet
 of the sizes you name, waits for them, runs the test, saves the report and
@@ -633,7 +647,8 @@ syshealth/
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
-├── deploy.sh          # One-command deploy to all EC2 instances
+├── aws.sh             # The fleet on AWS: up, down, status, test, ssh
+├── deploy.sh          # Deploy to EC2 instances you launched by hand
 ├── templates/
 │   └── index.html     # Dashboard markup
 ├── static/
@@ -649,6 +664,7 @@ syshealth/
 │   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply
     ├── check.sh       # Which sizes are reporting, and why one is not
+    ├── common.sh      # Shared by aws.sh and rightsize.sh
     └── rightsize.sh   # Build, test, report and destroy, in one command
 ```
 
