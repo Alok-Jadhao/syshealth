@@ -87,23 +87,46 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
 
 ## Experimental Results
 
-Same stress test (`stress --vm 2 --vm-bytes 800M --vm-keep`) run on all four instance types simultaneously:
+Run on 19 October 2026 on AWS (ap-south-1), with the one command that builds
+the fleet, runs the test and destroys it:
 
-| Instance Type | RAM | Peak PSI | State (old 2×/5× rule) |
-|---|---|---|---|
-| t3.micro | 1 GB | 17.10 | **CRITICAL** |
-| t3.small | 2 GB | 11.05 | **CRITICAL** |
-| t3.medium | 4 GB | 0.00 | **HEALTHY** |
-| t3.large | 8 GB | 0.00 | **HEALTHY** |
+```bash
+terraform/rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+```
 
-**Finding:** t3.medium (4 GB RAM) is the minimum instance type that stays HEALTHY under a 1.6 GB memory workload.
+All four sizes got the same memory load at the same moment, rising from 200 MB
+to 3,200 MB in 60-second steps. Each cell shows two numbers: the share of time
+the machine was stalled waiting for memory (PSI `some`, averaged over the step),
+then the share of its memory in use.
 
-> These states were assigned under the old baseline-ratio rule, which the
-> thresholds below replace, and `full` pressure was not recorded then. By peak
-> `some` alone, micro and small fall in the new Degraded band (10–40%). The
-> micro also had its job killed by the OOM killer, which the load-test results
-> now report directly. Re-run before quoting these: `terraform/rightsize.sh`
-> does the whole experiment, fleet up to fleet down, in one command.
+| Load | t3.micro (1 GB) | t3.small (2 GB) | t3.medium (4 GB) | t3.large (8 GB) |
+|---|---|---|---|---|
+| 200 MB | 0% / 56% | 0% / 31% | 0% / 18% | 0% / 9% |
+| 800 MB | **14% / 96%** | 0% / 63% | 0% / 34% | 0% / 17% |
+| 1,400 MB | no readings | 0.05% / 93% | 0% / 49% | 0% / 25% |
+| 2,000 MB | no readings | **25% / 99%** | 0% / 65% | 0% / 32% |
+| 2,600 MB | no readings | no readings | 0% / 80% | 0% / 40% |
+| 3,200 MB | no readings | no readings | 0.04% / 96% | 0% / 48% |
+
+Bold marks the step a size could not cope with: it was in the Critical band,
+with every task stalled at once for more than 10% of the time
+([below](#health-classification)). After that step, no more readings arrived
+from that size. The OOM killer killed nothing.
+
+**Verdict: t3.medium, $32.70 a month.** It is the smallest size that holds a
+1.6 GB app with the 25% spare asked for. The t3.small holds about 1.6 GB, which
+leaves only 2% spare. The t3.large copes too, at twice the price. This is the
+same answer as the August test, now from a run anyone can repeat with one
+command.
+
+**Memory in use is not memory pressure.** At 96% in use, the t3.micro was
+stalled 14% of the time; the t3.medium, also at 96%, was stalled 0.04%. A
+usage alarm at 80% would have fired on the t3.medium at 2,600 MB, and on the
+t3.small at 1,400 MB, while nothing was wrong.
+
+**Hold each step for at least 60 seconds.** An earlier run with 45-second steps
+put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
+9.7% of the time, just under the 10% line.
 
 ---
 

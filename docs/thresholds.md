@@ -141,10 +141,11 @@ How each line was chosen:
   values are constants at the top of `analyzer.py`. Each sample carries the
   values its agent used, so the dashboard draws whatever was actually applied.
 - **This is machine-wide pressure.** It includes the agent and the OS, not just
-  the app. Per-container PSI would isolate the app, but that is a different
-  collector.
-- **The README's experimental results predate this change.** They were labelled
-  under the 2×/5× rule and did not record `full`, so they should be re-run.
+  the app. Set `SYSHEALTH_APP` to also read one app's own cgroup
+  ([README](../README.md#measure-your-app-not-the-whole-machine)).
+- **The README's experimental results use these thresholds.** They were re-run
+  on AWS on 19 October 2026, with `full` recorded; the August results used the
+  2×/5× rule.
 
 ## Sources
 
