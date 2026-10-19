@@ -470,6 +470,7 @@ def install_demo_routes(machines):
 
     def demo_stop_stress():
         now = time.time()
+        server.record_stop(now)
         return jsonify({"results": {
             m.hostname: "stopped (simulated)" if m.stop_test(now) else "idle"
             for m in machines

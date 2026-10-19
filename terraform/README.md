@@ -155,6 +155,10 @@ exactly what PSI measures. Set `swap_mb = 0` to turn it off.
 
 **The agent is protected from the OOM killer** (`OOMScoreAdjust=-500`). The
 thing watching the box should outlive the load it was asked to generate.
+`OOMPolicy=continue` keeps it running when the OOM killer takes `stress`.
+Under systemd's default, killing any process in the unit stops the whole unit,
+and the agent came back without the test, so a size that ran out of memory
+reported nothing for the rest of the test.
 
 **IMDSv2 is required.** `instance.py` reads the instance type from the metadata
 service, which is how the dashboard knows a box is a `t3.micro` — hostname alone

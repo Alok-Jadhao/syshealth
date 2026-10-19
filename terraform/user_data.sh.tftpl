@@ -60,6 +60,10 @@ RestartSec=5
 # The agent is the thing watching the box, so it should outlive the load it is
 # asked to generate: let the OOM killer take stress first.
 OOMScoreAdjust=-500
+# stress runs in this unit's cgroup. systemd's default (stop) answers the OOM
+# killer taking stress by stopping the whole unit, agent included; it restarts
+# without the test, and that size reports nothing for the rest of it.
+OOMPolicy=continue
 
 [Install]
 WantedBy=multi-user.target

@@ -52,6 +52,15 @@ def record_test(test_id, plan):
         tests.popitem(last=False)
 
 
+def record_stop(now):
+    """Note that the running tests were stopped now, so a report can tell the
+    sizes stopped here from one that dropped out on its own."""
+    for test in _running_tests(now).values():
+        recorded = tests.get(str(test.get("test_id")))
+        if recorded is not None:
+            recorded.setdefault("stopped", now)
+
+
 def token_ok(header):
     """Whether an Authorization header carries this server's token."""
     if not TOKEN:
@@ -427,7 +436,9 @@ def run_stress():
 @app.route("/stop-stress", methods=["POST"])
 def stop_stress():
     results = {}
-    targets = _online_targets(time.time(), results)
+    now = time.time()
+    record_stop(now)
+    targets = _online_targets(now, results)
     results.update(_fan_out(targets, lambda ip: _agent_post(ip, "/stop")))
     return jsonify({"results": results})
 

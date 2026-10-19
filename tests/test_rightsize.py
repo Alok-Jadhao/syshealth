@@ -24,8 +24,12 @@ import server  # noqa: E402
 from analyzer import THRESHOLDS  # noqa: E402
 
 
-def run_test(spec, need=None, margin=None, tail=70, record=True):
-    """Run `spec` on a fresh simulated fleet and return the report."""
+def run_test(spec, need=None, margin=None, tail=70, record=True, drop=None, stop_after=None):
+    """Run `spec` on a fresh simulated fleet and return the report.
+
+    drop: {instance type: seconds}, when that size's agent loses the test
+    (it restarted) but reports on. stop_after: seconds, when Stop is pressed.
+    """
     server.instances.clear()
     server.tests.clear()
     machines = [dev.FakeMachine(t, ram, base, idle, i)
@@ -44,7 +48,14 @@ def run_test(spec, need=None, margin=None, tail=70, record=True):
     ts = start
     while ts <= now:
         for m in machines:
+            if drop and ts >= start + drop.get(m.instance_type, float("inf")):
+                m.stop_test(ts)
             dev.ingest(m, m.sample(ts), ts)
+        if stop_after is not None and ts >= start + stop_after:
+            server.record_stop(ts)
+            for m in machines:
+                m.stop_test(ts)
+            stop_after = None
         ts += 5
     return rightsize.report(server.snapshot(), None, need, margin, server.tests)
 
@@ -108,6 +119,28 @@ class RecommendationTest(unittest.TestCase):
         report = run_test(spec, need=1600)
         self.assertIsNone(report["recommendation"]["pick"])
         self.assertIn("stopped short", report["recommendation"]["headline"])
+
+    def test_a_size_that_drops_out_says_so(self):
+        # Its agent restarted part-way through (systemd stopped the unit when
+        # the OOM killer took stress): it reports on, without the test.
+        report = run_test(RAMP, drop={"t3.large": 150, "t3.micro": 300})
+        rows = rows_by_type(report)
+        large, micro = rows["t3.large"], rows["t3.micro"]
+        self.assertEqual(large["dropped"]["step"], 3)
+        self.assertEqual(large["outcome"], {"key": "unknown",
+                                            "text": "Stopped reporting at step 3 of 8"})
+        # A size that had already given out keeps that, and says the rest.
+        self.assertEqual(micro["outcome"]["key"], "critical")
+        self.assertTrue(micro["outcome"]["text"].endswith("stopped reporting at step 5 of 8"),
+                        micro["outcome"]["text"])
+        self.assertIsNone(rows["t3.medium"]["dropped"])
+        self.assertEqual(report["recommendation"]["pick"], "demo-t3-medium")
+
+    def test_a_stopped_test_is_not_a_drop_out(self):
+        report = run_test(RAMP, stop_after=150)
+        self.assertIn("stopped", server.tests["t1"])
+        for row in report["rows"]:
+            self.assertIsNone(row["dropped"], row["instance_type"])
 
     def test_nothing_big_enough(self):
         spec = dict(RAMP, low_mb=2000, high_mb=12000, steps=4)

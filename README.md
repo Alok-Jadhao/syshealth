@@ -101,28 +101,28 @@ then the share of its memory in use.
 
 | Load | t3.micro (1 GB) | t3.small (2 GB) | t3.medium (4 GB) | t3.large (8 GB) |
 |---|---|---|---|---|
-| 200 MB | 0% / 56% | 0% / 31% | 0% / 18% | 0% / 9% |
-| 800 MB | **14% / 96%** | 0% / 63% | 0% / 34% | 0% / 17% |
-| 1,400 MB | no readings | 0.05% / 93% | 0% / 49% | 0% / 25% |
-| 2,000 MB | no readings | **25% / 99%** | 0% / 65% | 0% / 32% |
-| 2,600 MB | no readings | no readings | 0% / 80% | 0% / 40% |
-| 3,200 MB | no readings | no readings | 0.04% / 96% | 0% / 48% |
+| 200 MB | 0% / 56% | 0% / 31% | 0% / 17% | 0% / 9% |
+| 800 MB | **13% / 97%** | 0% / 62% | 0% / 33% | 0% / 17% |
+| 1,400 MB | killed | 0.04% / 93% | 0% / 49% | 0% / 25% |
+| 2,000 MB | killed | **22% / 99%** | 0% / 64% | 0% / 32% |
+| 2,600 MB | killed | killed | 0% / 80% | 0% / 40% |
+| 3,200 MB | killed | killed | 0.03% / 95% | 0% / 48% |
 
 Bold marks the step a size could not cope with: it was in the Critical band,
 with every task stalled at once for more than 10% of the time
-([below](#health-classification)). After that step, no more readings arrived
-from that size. The OOM killer killed nothing.
+([below](#health-classification)). "Killed": from the next step on, the load no
+longer fit in memory and swap, and the OOM killer ended it each time.
 
 **Verdict: t3.medium, $32.70 a month.** It is the smallest size that holds a
 1.6 GB app with the 25% spare asked for. The t3.small holds about 1.6 GB, which
-leaves only 2% spare. The t3.large copes too, at twice the price. This is the
+leaves only 5% spare. The t3.large copes too, at twice the price. This is the
 same answer as the August test, now from a run anyone can repeat with one
 command.
 
-**Memory in use is not memory pressure.** At 96% in use, the t3.micro was
-stalled 14% of the time; the t3.medium, also at 96%, was stalled 0.04%. A
-usage alarm at 80% would have fired on the t3.medium at 2,600 MB, and on the
-t3.small at 1,400 MB, while nothing was wrong.
+**Memory in use is not memory pressure.** At 97% in use, the t3.micro was
+stalled 13% of the time; the t3.medium, at 95%, was stalled 0.03%. A usage
+alarm at 80% would have fired on the t3.medium at 3,200 MB, and on the t3.small
+at 1,400 MB, while neither was slowed down.
 
 **Hold each step for at least 60 seconds.** An earlier run with 45-second steps
 put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
@@ -375,7 +375,10 @@ the sharpest spike.
 Each step is one run of `stress --vm <workers> --vm-bytes <MB per worker>M
 --vm-keep --timeout <s>s`. A step always lasts its planned time, even if the OOM
 killer ends `stress` early, so every size stays in step. The early exit is
-counted and reported as "ran out of memory".
+counted and reported as "ran out of memory". A size whose readings of the test
+stop before the plan ends, without anyone pressing **Stop test**, is reported
+as "stopped reporting at step N", so its missing steps are not mistaken for a
+finished test.
 
 The plan is built and bounded in one place, `loadtest.py`: up to 16 GB, 16
 workers, steps of 10–1800 s, an hour in all. The agent re-checks every plan

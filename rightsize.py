@@ -27,6 +27,7 @@ from analyzer import THRESHOLDS
 
 SETTLE_SEC = 10    # a step's first 10 s reading still carries the step before it
 TRAIL_SEC = 60     # states are judged on a minute, so they trail the load
+DROPOUT_SEC = 15   # this much of the test still to run at a size's last reading: it dropped out
 DEFAULT_MARGIN_PCT = 25
 MAX_MARGIN_PCT = 200
 MAX_CPU_VCPU = 192   # the most vCPUs any size in the price list has
@@ -279,8 +280,14 @@ def cpu_check(itype, cpu, margin_pct):
 
 def _outcome(row, running, variable):
     """The table's one-line result: how the size coped with the whole test."""
+    dropped = row.get("dropped")
+    where = ""
+    if dropped:
+        where = ("at step %s of %s" % (dropped["step"], dropped["steps"]) if variable
+                 else "with %ds of the test to go" % dropped["left_sec"])
     if row["killed"]:
-        return "critical", "Ran out of memory: the kernel killed the test"
+        text = "Ran out of memory: the kernel killed the test"
+        return "critical", text + (", then it stopped reporting " + where if dropped else "")
     key = RANK_KEY[row["rank"]]
     text = {"critical": "Could not cope", "degraded": "Coped, but slowed down",
             "healthy": "Coped comfortably", "unknown": "Too early to tell"}[key]
@@ -290,11 +297,19 @@ def _outcome(row, running, variable):
         text = "Slowed down from " + loadtest.format_mb(row["degraded_from"])
     elif running and key == "healthy":
         text = "No trouble so far"
+    if dropped:
+        if key in ("healthy", "unknown"):
+            # It cannot be said to have coped with a test it did not finish.
+            return "unknown", "Stopped reporting " + where
+        text += ", then stopped reporting " + where
     return key, text
 
 
-def analyse_instance(inst, test_id):
-    """One instance's part in one test, or None if it took no part."""
+def analyse_instance(inst, test_id, stopped_at=None):
+    """One instance's part in one test, or None if it took no part.
+
+    stopped_at: when someone stopped the test, if they did.
+    """
     samples = inst["samples"]
     during = [s for s in samples if _test(s) and str(_test(s)["test_id"]) == test_id]
     if not during:
@@ -303,6 +318,16 @@ def analyse_instance(inst, test_id):
     start, end = _ts(during[0]), _ts(during[-1])
     latest = samples[-1]
     running = bool(inst.get("online") and _test(latest) and str(_test(latest)["test_id"]) == test_id)
+
+    # Its last reading of the test still had time to run, and nobody pressed
+    # Stop: the size dropped out (its agent restarted, or could not reach the
+    # server). Said, so the steps it missed do not pass for a finished test.
+    last = _test(during[-1])
+    left = _num(last.get("remaining_sec"), 0.0)
+    dropped = None
+    if not running and left > DROPOUT_SEC and not (stopped_at and stopped_at <= end + DROPOUT_SEC):
+        dropped = {"step": last.get("step"), "steps": last.get("steps"),
+                   "load_mb": last.get("load_mb"), "left_sec": int(round(left))}
 
     # The state is judged on a minute and must hold for 15 s, so it trails
     # the load: look a minute past the end for the worst of it.
@@ -333,6 +358,7 @@ def analyse_instance(inst, test_id):
         "price": pricing.lookup(itype, region),
         "thresholds": th,
         "running": running,
+        "dropped": dropped,
         # How bad it got: the worse of the states it reported and the sustained
         # pressure at its worst load level. With short steps the one-minute
         # state never catches up with a level that was plainly too much.
@@ -445,8 +471,11 @@ def recommend(rows, need_mb, margin_pct):
                          "and over the %d%% you want spare."
                          % (_cap_words(cap), pick["spare_pct"], need_s, margin_pct))
     elif pick["fit"] == "fits" and pick["spare_pct"] > 0:
-        out["detail"] = ("It held %s, the most this test asked of it, without slowing down: at "
-                         "least %d%% more than your app's %s." % (_cap_words(cap), pick["spare_pct"], need_s))
+        out["detail"] = ("It held %s, %s, without slowing down: at least %d%% more than your "
+                         "app's %s." % (_cap_words(cap),
+                                        "before it stopped reporting" if pick.get("dropped")
+                                        else "the most this test asked of it",
+                                        pick["spare_pct"], need_s))
     elif pick["fit"] == "fits":
         out["detail"] = "It held your app's %s without slowing down." % need_s
     elif pick["fit"] == "unmeasured":
@@ -582,11 +611,12 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None, cp
     if not test_id:
         return {"test_id": None}
 
-    rows = [r for r in (analyse_instance(inst, test_id) for inst in snapshot) if r]
+    recorded = (plans or {}).get(test_id) or {}
+    rows = [r for r in (analyse_instance(inst, test_id, recorded.get("stopped"))
+                        for inst in snapshot) if r]
     if not rows:
         return {"test_id": test_id, "error": "No instance has reported this test."}
 
-    recorded = (plans or {}).get(test_id) or {}
     plan = recorded.get("plan")
     info = rows[0]["_test"]
     mode = (plan or {}).get("mode") or info.get("mode") or "peak"
