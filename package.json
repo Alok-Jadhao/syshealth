@@ -9,7 +9,7 @@
     "report": "python3 cli.py report",
     "mcp": "python3 mcp_server.py",
     "start": "python3 server.py",
-    "agent": "python3 syshealth.py",
+    "agent": "SYSHEALTH_SERVER_URL=${SYSHEALTH_SERVER_URL:-http://127.0.0.1:5000/metrics} python3 syshealth.py",
     "calibrate": "python3 syshealth.py calibrate"
   },
   "engines": {

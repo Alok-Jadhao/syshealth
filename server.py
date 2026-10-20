@@ -443,5 +443,25 @@ def stop_stress():
     return jsonify({"results": results})
 
 
+def serve(host="0.0.0.0", port=5000):
+    """Serve the dashboard with waitress; Flask's own server is for development.
+
+    One process with threads, never several worker processes: the history and
+    the tests live in this process's memory, and a second one would see none
+    of it.
+    """
+    try:
+        import waitress
+    except ImportError:
+        print("waitress is not installed (apt install python3-waitress, or pip install "
+              "waitress), so this is Flask's development server, which is not made "
+              "for a machine others can reach.", flush=True)
+        app.run(host=host, port=port)
+        return
+    print(f"SysHealth dashboard on http://{host}:{port}", flush=True)
+    # Nothing sits in front of it, so no X-Forwarded-* header is believed.
+    waitress.serve(app, host=host, port=port, threads=8, clear_untrusted_proxy_headers=True)
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    serve()

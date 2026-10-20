@@ -7,7 +7,7 @@ echo "=== syshealth dashboard bootstrap $(date -Is) ==="
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -y
-apt-get install -y --no-install-recommends git python3 python3-flask python3-requests
+apt-get install -y --no-install-recommends git python3 python3-flask python3-requests python3-waitress
 
 git clone --depth 1 --branch '${repo_branch}' '${repo_url}' /opt/syshealth
 

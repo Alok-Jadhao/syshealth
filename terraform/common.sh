@@ -1,5 +1,5 @@
-# Shared by ../aws.sh and rightsize.sh: sourced, not run. Expects to be in the
-# terraform directory.
+# Shared by ../aws.sh, rightsize.sh and ../deploy.sh: sourced, not run. The
+# terraform.tfvars helpers expect to be in the terraform directory.
 
 SYSHEALTH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # The key the fleet is built with when terraform.tfvars names no key pair of
@@ -74,4 +74,20 @@ missing = [t for t, p in zip(types, prices) if not p]
 total = sum(p["usd_hour"] for p in prices if p)
 print("about $%.2f an hour" % total + (" plus %s, not in the price list" % ", ".join(missing) if missing else ""))
 ' "$1" "$2" "$3")
+}
+
+# This working tree as a .tar.gz on stdout: every file git tracks, as it is on
+# disk now, uncommitted changes included. Untracked files stay behind, so
+# state, tfvars and saved reports never leave this machine.
+pack_tree() {
+  git -C "$SYSHEALTH_ROOT" rev-parse --git-dir >/dev/null 2>&1 ||
+    die "deploying sends the files git tracks, so it needs a git checkout of syshealth"
+  (cd "$SYSHEALTH_ROOT" && python3 -c '
+import os, subprocess, sys, tarfile
+names = subprocess.run(["git", "ls-files", "-z"], capture_output=True, check=True).stdout
+with tarfile.open(fileobj=sys.stdout.buffer, mode="w|gz") as tar:
+    for name in names.decode().split("\0"):
+        if name and os.path.isfile(name):   # tracked but deleted here: skip
+            tar.add(name)
+')
 }

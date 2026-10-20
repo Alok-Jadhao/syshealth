@@ -17,7 +17,10 @@ from diagnose import Diagnoser, app_verdict
 from reporter import Reporter
 
 HOSTNAME = socket.gethostname()
-SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "http://13.61.11.18:5000/metrics")
+# Where samples go: the server's /metrics, e.g. http://10.0.1.5:5000/metrics.
+# No default. A built-in address goes stale, and an agent still pointing at one
+# would send this machine's readings, and its token, to whoever has that IP now.
+SERVER_URL = os.environ.get("SYSHEALTH_SERVER_URL", "").strip() or None
 CONTROL_PORT = 5001
 # The secret shared with the server: sent with every push, and required of
 # anyone asking this machine to run a load test.
@@ -267,6 +270,10 @@ def push_to_server(payload):
 
 
 def main():
+    if not SERVER_URL:
+        sys.exit("SYSHEALTH_SERVER_URL is not set, so there is nowhere to send samples. Point it\n"
+                 "at the server: SYSHEALTH_SERVER_URL=http://SERVER_IP:5000/metrics\n"
+                 "(http://127.0.0.1:5000/metrics when the server runs on this machine).")
     if CONTROL:
         threading.Thread(target=run_control_server, daemon=True).start()
 

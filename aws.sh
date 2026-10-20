@@ -9,6 +9,9 @@
 #   ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 #                                  run the right-sizing test on it (cli.py run)
 #   ./aws.sh ssh t3.small          a shell on one machine (or: dashboard)
+#   ./aws.sh deploy [agents|server]
+#                                  send this working tree to the fleet and
+#                                  restart it, without rebuilding anything
 #
 # Options for up:
 #   --profile NAME   AWS CLI profile (default: $AWS_PROFILE, else your default keys)
@@ -23,7 +26,8 @@
 # again from a new address to move it. up remembers the account it built in,
 # and down refuses any other, so a changed AWS_PROFILE cannot leave a fleet
 # running unseen. Its own Terraform workspace, so it never touches a fleet
-# built by hand or by terraform/rightsize.sh.
+# built by hand or by terraform/rightsize.sh. deploy sends the files git
+# tracks, uncommitted changes included; git add a new file for it to go.
 set -euo pipefail
 SELF=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
 cd "$(dirname "$0")/terraform"
@@ -36,7 +40,7 @@ SAVED=.aws-fleet                   # what up built with; see save_settings
 KNOWN_HOSTS=.aws-fleet-known_hosts # fleet IPs are reused, so not ~/.ssh's
 export TF_IN_AUTOMATION=1
 
-usage() { sed -n '2,26p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,30p' "$SELF" | sed 's/^# \{0,1\}//'; }
 
 tf() { TF_WORKSPACE=$WORKSPACE terraform "$@"; }
 
@@ -87,6 +91,13 @@ set_tf_vars() {   # region, types, cidr
 }
 
 instances_json() { tf output -json instances 2>/dev/null || echo '{}'; }
+
+# How to reach the fleet: its own key (unless terraform.tfvars names a key pair
+# of yours, used from your agent) and its own known_hosts.
+ssh_opts() {
+  SSH_OPTS=(-o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$PWD/$KNOWN_HOSTS")
+  [ -n "$(tfvar key_name)" ] || SSH_OPTS+=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
+}
 
 # Only the lines that say something finished, so a long apply shows progress.
 progress() { awk '/complete|Apply complete|Destroy complete/ { print "  " $0; fflush() }'; }
@@ -175,6 +186,7 @@ SysHealth is up in account $ACCOUNT ($region).
   Token      $token   (the dashboard asks for it to start a test)
   Test       ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
   SSH        ./aws.sh ssh dashboard   (or a size: ${types// /, })
+  Deploy     ./aws.sh deploy          (this working tree, without rebuilding)
   Status     ./aws.sh status
 It costs $cost until you run:  ./aws.sh down
 EOF
@@ -294,11 +306,57 @@ if name not in machines:
     sys.exit("no machine called %s; there are: %s" % (name, ", ".join(machines)))
 print(machines[name]["public_ip"])
 ' "$name") || exit 1
-  local key=()
-  # A key pair of your own in terraform.tfvars means your own key, from your agent.
-  [ -n "$(tfvar key_name)" ] || key=(-i "$SSH_KEY" -o IdentitiesOnly=yes)
-  exec ssh "${key[@]}" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$PWD/$KNOWN_HOSTS" \
-    "ubuntu@$ip" "$@"
+  ssh_opts
+  exec ssh "${SSH_OPTS[@]}" "ubuntu@$ip" "$@"
+}
+
+# The code on the fleet is a clone made at boot, in /opt/syshealth. This
+# overwrites its files with this working tree's and restarts the services; the
+# token and the dashboard's address are in their systemd units, so they stay.
+cmd_deploy() {
+  local which=${1:-all}
+  case "$which" in
+    all|agents|server) ;;
+    *) die "deploy takes agents, server, or nothing for both" ;;
+  esac
+  need_tools terraform python3 ssh git
+  load_settings
+  [ -n "$S_ACCOUNT" ] || die "nothing is up. Build it first: ./aws.sh up --profile NAME"
+  local bundle machines name ip unit failed=""
+  bundle=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$bundle'" EXIT
+  pack_tree > "$bundle"
+  machines=$(instances_json | python3 -c '
+import json, sys
+for name, m in json.load(sys.stdin).items():
+    print(name, m["public_ip"])
+')
+  [ -n "$machines" ] || die "the fleet has no machines yet. ./aws.sh up finishes it."
+  ssh_opts
+  if [ "$which" != agents ]; then
+    echo "Restarting the dashboard empties its graphs: history is kept in memory only."
+  fi
+  # Dashboard first, so the agents come back to a server that knows what they send.
+  while read -r name ip; do
+    if [ "$name" = dashboard ]; then
+      unit=syshealth-server
+      [ "$which" = agents ] && continue
+    else
+      unit=syshealth
+      [ "$which" = server ] && continue
+    fi
+    if ssh "${SSH_OPTS[@]}" -o ConnectTimeout=10 "ubuntu@$ip" \
+         "sudo tar -xzf - --no-same-owner -C /opt/syshealth && sudo systemctl restart $unit &&
+          sleep 3 && systemctl is-active --quiet $unit" < "$bundle"; then
+      echo "  $name: updated and running"
+    else
+      echo "  $name: FAILED. Look with: ./aws.sh ssh $name sudo journalctl -u $unit -n 30"
+      failed="$failed $name"
+    fi
+  done <<< "$machines"
+  [ -z "$failed" ] || die "not deployed to:$failed"
+  python3 "$SYSHEALTH_ROOT/cli.py" --server "$(tf output -raw dashboard_url)" status || true
 }
 
 YES=0
@@ -310,7 +368,8 @@ case "$command" in
   status) cmd_status "$@" ;;
   test) cmd_test "$@" ;;
   ssh) cmd_ssh "$@" ;;
+  deploy) cmd_deploy "$@" ;;
   -h|--help|help) usage ;;
   "") usage; exit 1 ;;
-  *) die "no command '$command'. Use up, down, status, test or ssh (--help)." ;;
+  *) die "no command '$command'. Use up, down, status, test, ssh or deploy (--help)." ;;
 esac

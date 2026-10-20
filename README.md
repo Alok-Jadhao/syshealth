@@ -192,7 +192,13 @@ While it is up:
 ./aws.sh status               # what is running, since when, what it has cost
 ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # which size to buy
 ./aws.sh ssh t3.small         # a shell on one machine (or: dashboard)
+./aws.sh deploy               # send your local changes to it (or: agents, server)
 ```
+
+`deploy` copies the files git tracks, as they are in your working tree, to
+every machine and restarts them, without rebuilding anything. `git add` a new
+file first. Restarting the dashboard empties its graphs, since history is kept
+in memory.
 
 `--region` and `--types "t3.small m7i.large"` change where it runs and which
 sizes. If you move to another network, run `up` again: it moves the firewall to
@@ -232,7 +238,7 @@ aws ec2 authorize-security-group-ingress --region $REGION \
 ```bash
 ssh -i syshealth-key.pem ubuntu@YOUR_SERVER_IP
 
-sudo apt update && sudo apt install -y python3-flask python3-requests
+sudo apt update && sudo apt install -y python3-flask python3-requests python3-waitress
 git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
 export SYSHEALTH_TOKEN=$(python3 -c 'import secrets; print(secrets.token_urlsafe(24))')
 echo "$SYSHEALTH_TOKEN"     # the agents and anyone starting a test need it
@@ -247,7 +253,8 @@ ssh -i syshealth-key.pem ubuntu@YOUR_AGENT_IP
 sudo apt update && sudo apt install -y python3-requests stress
 git clone https://github.com/Alok-Jadhao/syshealth.git && cd syshealth
 
-# Point the agent at your server, with the server's token
+# Point the agent at your server (required: there is no built-in address),
+# with the server's token
 export SYSHEALTH_SERVER_URL=http://YOUR_SERVER_IP:5000/metrics
 export SYSHEALTH_TOKEN=<the server's token>
 
@@ -264,20 +271,21 @@ The instance appears on the dashboard within 5 seconds.
 
 ## Deploy Script
 
-After making local changes, push to all instances with one command:
+After changing code locally, send it to the machines you set up above with one
+command. Say where they are and give the token; nothing is built in:
 
 ```bash
-# Deploy agent changes to all EC2 instances
-./deploy.sh agents
+export SERVER=YOUR_SERVER_IP AGENTS="AGENT_IP_1 AGENT_IP_2" SYSHEALTH_TOKEN=<the server's token>
 
-# Deploy server + dashboard changes
-./deploy.sh server
-
-# Deploy everything
-./deploy.sh
+./deploy.sh agents     # the agents only
+./deploy.sh server     # the server and dashboard only
+./deploy.sh            # both
 ```
 
-Edit the `AGENTS` and `SERVER` variables at the top of `deploy.sh` to match your IPs.
+It copies the files git tracks into `~/syshealth` on each machine and restarts
+them, with the token, and with the agents pointed at `http://$SERVER:5000/metrics`.
+`KEY` names the SSH key if it is not `syshealth-key.pem`. For a fleet built with
+`./aws.sh up`, use `./aws.sh deploy` instead.
 
 ---
 
@@ -516,7 +524,8 @@ memory pressure.
 ## Measure your app, not the whole machine
 
 The machine's pressure counts every task on it: the agent, the OS, a load
-test. Name your app and the agent also reads its own cgroup:
+test. Name your app and the agent also reads its own cgroup (with
+`SYSHEALTH_SERVER_URL` and `SYSHEALTH_TOKEN` set as in the Quick Start):
 
 ```bash
 SYSHEALTH_APP=myapp.service python3 syshealth.py         # a systemd unit
@@ -673,7 +682,7 @@ syshealth/
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
-├── aws.sh             # The fleet on AWS: up, down, status, test, ssh
+├── aws.sh             # The fleet on AWS: up, down, status, test, ssh, deploy
 ├── deploy.sh          # Deploy to EC2 instances you launched by hand
 ├── templates/
 │   └── index.html     # Dashboard markup
@@ -685,12 +694,12 @@ syshealth/
 ├── tools/
 │   └── update_prices.py  # Refresh data/prices.json from AWS's public price list
 ├── tests/             # python3 -m unittest discover -s tests  (or npm test); CI runs them
-├── requirements.txt   # flask, requests
+├── requirements.txt   # flask, requests, waitress
 ├── docs/
 │   └── thresholds.md  # What the number means; the research behind each threshold
 └── terraform/         # Dashboard + one instance per size, in one apply
     ├── check.sh       # Which sizes are reporting, and why one is not
-    ├── common.sh      # Shared by aws.sh and rightsize.sh
+    ├── common.sh      # Shared by aws.sh, rightsize.sh and deploy.sh
     └── rightsize.sh   # Build, test, report and destroy, in one command
 ```
 
@@ -699,8 +708,10 @@ syshealth/
 ## Requirements
 
 - Python 3.10+ (CI runs 3.12, Ubuntu 24.04's, and 3.14)
-- Flask and requests: `sudo apt install python3-flask python3-requests`, or
-  `pip install -r requirements.txt` in a virtualenv
+- Flask, requests and waitress: `sudo apt install python3-flask python3-requests
+  python3-waitress`, or `pip install -r requirements.txt` in a virtualenv.
+  Without waitress the server falls back to Flask's development server, and
+  says so.
 - Linux kernel ≥ 4.20 (PSI support)
 - `stress` package on agent instances (`sudo apt install stress`)
 - Node ≥ 18 only if you want `npm run dev` — `python3 dev.py` is the same thing
@@ -710,7 +721,7 @@ syshealth/
 
 ## Tech Stack
 
-Python · Flask · Linux PSI · vmstat · AWS EC2 · Terraform · Bash
+Python · Flask · waitress · Linux PSI · vmstat · AWS EC2 · Terraform · Bash
 
 The graph is hand-written inline SVG with no charting library and no build step,
 so the dashboard loads with nothing fetched from a CDN.

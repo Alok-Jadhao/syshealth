@@ -26,7 +26,7 @@ Defaults to `ap-south-1` (Mumbai). Override with `region` in `terraform.tfvars`.
   from any other. Otherwise a stale `AWS_PROFILE` could make Terraform believe
   the instances were gone while they kept billing.
 
-`./aws.sh status`, `test` and `ssh` cover the rest ([README](../README.md#run-it-on-aws-one-command-up-one-down)).
+`./aws.sh status`, `test`, `ssh` and `deploy` cover the rest ([README](../README.md#run-it-on-aws-one-command-up-one-down)).
 The rest of this page is the plain-Terraform route underneath it.
 
 ## What you need
