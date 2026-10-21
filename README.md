@@ -1,5 +1,7 @@
 # SysHealth — Find the right instance size for your app
 
+[![test](https://github.com/Alok-Jadhao/syshealth/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Alok-Jadhao/syshealth/actions/workflows/test.yml)
+
 SysHealth tells you **which instance size to buy for your app, and shows the
 evidence**. It runs the memory your app needs on several sizes at once, measures
 how long programs wait for memory on each (Linux PSI, Pressure Stall
@@ -7,11 +9,41 @@ Information), and names the cheapest size that holds your app's peak with room
 to spare, in dollars a month. A Flask server collects the agents' samples and
 serves a live dashboard; the answer is also one API call away.
 
-### Why not just Prometheus?
+![The same memory load on four EC2 sizes at once, AWS ap-south-1, 19 October 2026: for each size and load level, the time stalled waiting for memory and the memory in use. For a 1.6 GB app with 25% spare: t3.medium, $32.70 a month.](docs/img/real-run-2026-10-19.svg)
 
-Prometheus with node_exporter already collects memory PSI, and Grafana can graph
-it. If all you need is to *watch* pressure, use them. SysHealth does what a
-monitor cannot, because a monitor only observes:
+**A real run on AWS** ([details below](#experimental-results)): the same load on
+four sizes at the same moment. The t3.micro was stalled 13% of the time at 97% in
+use, then OOM-killed from 1.4 GB. The t3.small was stalled 22% at 2 GB. The
+t3.medium held 3.2 GB at 95% in use and was stalled 0.03% of the time. For a
+1.6 GB app with 25% spare, that is **t3.medium at $32.70 a month**. Memory in use
+is not memory pressure: 97% and 95% in use look alike, and only one of them was
+slow.
+
+### Try it
+
+```bash
+npm run dev                   # a simulated four-size fleet at http://127.0.0.1:5000, no AWS
+terraform/rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # the real run: build, test, report, destroy
+./aws.sh up --profile NAME    # or keep a fleet up, and test from its dashboard
+```
+
+The first needs only Flask and requests ([below](#preview-it-locally)); the
+other two need AWS credentials and Terraform
+([below](#run-it-on-aws-one-command-up-one-down)).
+
+### Why not Compute Optimizer, a usage alarm, or Prometheus?
+
+- **AWS Compute Optimizer** recommends a size from at least 30 hours of
+  CloudWatch data on instances that are already running, and sees memory only
+  as the CloudWatch agent's `mem_used_percent`: how full, not how slow.
+  SysHealth answers before you buy, from one test, by how long programs
+  actually waited for memory.
+- **A usage alarm** ("memory over 80% in use") cannot tell full from slow.
+  Above, the t3.micro at 97% in use was stalled 13% of the time, and the
+  t3.medium at 95% was stalled 0.03%.
+- **Prometheus with node_exporter** already collects memory PSI, and Grafana
+  can graph it. If all you need is to *watch* pressure, use them. SysHealth
+  does what a monitor cannot, because a monitor only observes:
 
 | | Prometheus + Grafana | SysHealth |
 |---|---|---|
@@ -31,6 +63,51 @@ monitor cannot, because a monitor only observes:
 They also work together: SysHealth serves everything it knows in Prometheus's
 format at `GET /metrics`, the states, the cause data and the last test's verdict
 included ([below](#with-prometheus)).
+
+---
+
+## Experimental Results
+
+Run on 19 October 2026 on AWS (ap-south-1), with the one command that builds
+the fleet, runs the test and destroys it:
+
+```bash
+terraform/rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+```
+
+All four sizes got the same memory load at the same moment, rising from 200 MB
+to 3,200 MB in 60-second steps. Each cell shows two numbers: the share of time
+the machine was stalled waiting for memory (PSI `some`, averaged over the step),
+then the share of its memory in use.
+
+| Load | t3.micro (1 GB) | t3.small (2 GB) | t3.medium (4 GB) | t3.large (8 GB) |
+|---|---|---|---|---|
+| 200 MB | 0% / 56% | 0% / 31% | 0% / 17% | 0% / 9% |
+| 800 MB | **13% / 97%** | 0% / 62% | 0% / 33% | 0% / 17% |
+| 1,400 MB | killed | 0.04% / 93% | 0% / 49% | 0% / 25% |
+| 2,000 MB | killed | **22% / 99%** | 0% / 64% | 0% / 32% |
+| 2,600 MB | killed | killed | 0% / 80% | 0% / 40% |
+| 3,200 MB | killed | killed | 0.03% / 95% | 0% / 48% |
+
+Bold marks the step a size could not cope with: it was in the Critical band,
+with every task stalled at once for more than 10% of the time
+([below](#health-classification)). "Killed": from the next step on, the load no
+longer fit in memory and swap, and the OOM killer ended it each time.
+
+**Verdict: t3.medium, $32.70 a month.** It is the smallest size that holds a
+1.6 GB app with the 25% spare asked for. The t3.small holds about 1.6 GB, which
+leaves only 5% spare. The t3.large copes too, at twice the price. This is the
+same answer as the August test, now from a run anyone can repeat with one
+command.
+
+**Memory in use is not memory pressure.** At 97% in use, the t3.micro was
+stalled 13% of the time; the t3.medium, at 95%, was stalled 0.03%. A usage
+alarm at 80% would have fired on the t3.medium at 3,200 MB, and on the t3.small
+at 1,400 MB, while neither was slowed down.
+
+**Hold each step for at least 60 seconds.** An earlier run with 45-second steps
+put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
+9.7% of the time, just under the 10% line.
 
 ---
 
@@ -82,51 +159,6 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
   app's peak with the room to spare you ask for, priced per month, with a chart
   of pressure against load that shows where each size gives out
   ([below](#right-sizing-which-size-to-buy))
-
----
-
-## Experimental Results
-
-Run on 19 October 2026 on AWS (ap-south-1), with the one command that builds
-the fleet, runs the test and destroys it:
-
-```bash
-terraform/rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
-```
-
-All four sizes got the same memory load at the same moment, rising from 200 MB
-to 3,200 MB in 60-second steps. Each cell shows two numbers: the share of time
-the machine was stalled waiting for memory (PSI `some`, averaged over the step),
-then the share of its memory in use.
-
-| Load | t3.micro (1 GB) | t3.small (2 GB) | t3.medium (4 GB) | t3.large (8 GB) |
-|---|---|---|---|---|
-| 200 MB | 0% / 56% | 0% / 31% | 0% / 17% | 0% / 9% |
-| 800 MB | **13% / 97%** | 0% / 62% | 0% / 33% | 0% / 17% |
-| 1,400 MB | killed | 0.04% / 93% | 0% / 49% | 0% / 25% |
-| 2,000 MB | killed | **22% / 99%** | 0% / 64% | 0% / 32% |
-| 2,600 MB | killed | killed | 0% / 80% | 0% / 40% |
-| 3,200 MB | killed | killed | 0.03% / 95% | 0% / 48% |
-
-Bold marks the step a size could not cope with: it was in the Critical band,
-with every task stalled at once for more than 10% of the time
-([below](#health-classification)). "Killed": from the next step on, the load no
-longer fit in memory and swap, and the OOM killer ended it each time.
-
-**Verdict: t3.medium, $32.70 a month.** It is the smallest size that holds a
-1.6 GB app with the 25% spare asked for. The t3.small holds about 1.6 GB, which
-leaves only 5% spare. The t3.large copes too, at twice the price. This is the
-same answer as the August test, now from a run anyone can repeat with one
-command.
-
-**Memory in use is not memory pressure.** At 97% in use, the t3.micro was
-stalled 13% of the time; the t3.medium, at 95%, was stalled 0.03%. A usage
-alarm at 80% would have fired on the t3.medium at 3,200 MB, and on the t3.small
-at 1,400 MB, while neither was slowed down.
-
-**Hold each step for at least 60 seconds.** An earlier run with 45-second steps
-put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
-9.7% of the time, just under the 10% line.
 
 ---
 
@@ -701,7 +733,9 @@ syshealth/
 ├── tests/             # python3 -m unittest discover -s tests  (or npm test); CI runs them
 ├── requirements.txt   # flask, requests, waitress
 ├── docs/
-│   └── thresholds.md  # What the number means; the research behind each threshold
+│   ├── thresholds.md  # What the number means; the research behind each threshold
+│   ├── img/real-run-2026-10-19.svg  # The picture at the top, from the real run's report
+│   └── make_result_figure.py        # Draws it: python3 docs/make_result_figure.py REPORT.json
 └── terraform/         # Dashboard + one instance per size, in one apply
     ├── check.sh       # Which sizes are reporting, and why one is not
     ├── common.sh      # Shared by aws.sh, rightsize.sh and deploy.sh

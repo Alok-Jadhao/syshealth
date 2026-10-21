@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 796 408" width="796" height="408" font-family="system-ui, -apple-system, Segoe UI, sans-serif">
+<title>The same memory load on four EC2 sizes at once: Choose t3.medium · $32.70 a month</title>
+<rect width="796" height="408" rx="12" fill="#ffffff" stroke="#e1e0d9"/>
+<text x="24" y="36" font-size="20" font-weight="700" fill="#0b0b0b" text-anchor="start">The same memory load on four EC2 sizes at once</text>
+<text x="24" y="60" font-size="13" font-weight="normal" fill="#52514e" text-anchor="start">AWS ap-south-1, 19 October 2026. Each cell: time stalled waiting for memory (PSI), and memory in use.</text>
+<text x="236" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">200 MB</text>
+<text x="334" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">800 MB</text>
+<text x="432" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">1,400 MB</text>
+<text x="530" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">2,000 MB</text>
+<text x="628" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">2,600 MB</text>
+<text x="726" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="middle">3,200 MB</text>
+<text x="24" y="100" font-size="12" font-weight="600" fill="#52514e" text-anchor="start">Load on every size</text>
+<text x="24" y="134" font-size="15" font-weight="700" fill="#0b0b0b" text-anchor="start">t3.micro</text>
+<text x="24" y="152" font-size="12" font-weight="normal" fill="#52514e" text-anchor="start">1 GiB · $8.18 a month</text>
+<rect x="190" y="112" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="236" y="135" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="236" y="152" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">56% in use</text>
+<rect x="288" y="112" width="92" height="50" rx="6" fill="#d03b3b"/>
+<text x="334" y="135" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">13%</text>
+<text x="334" y="152" font-size="11" font-weight="normal" fill="#ffffff" text-anchor="middle">97% in use</text>
+<rect x="386" y="112" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="432" y="134" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="432" y="151" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<rect x="484" y="112" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="530" y="134" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="530" y="151" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<rect x="582" y="112" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="628" y="134" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="628" y="151" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<rect x="680" y="112" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="726" y="134" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="726" y="151" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<text x="24" y="190" font-size="15" font-weight="700" fill="#0b0b0b" text-anchor="start">t3.small</text>
+<text x="24" y="208" font-size="12" font-weight="normal" fill="#52514e" text-anchor="start">2 GiB · $16.35 a month</text>
+<rect x="190" y="168" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="236" y="191" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="236" y="208" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">30% in use</text>
+<rect x="288" y="168" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="334" y="191" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="334" y="208" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">62% in use</text>
+<rect x="386" y="168" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="432" y="191" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0.04%</text>
+<text x="432" y="208" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">93% in use</text>
+<rect x="484" y="168" width="92" height="50" rx="6" fill="#d03b3b"/>
+<text x="530" y="191" font-size="17" font-weight="700" fill="#ffffff" text-anchor="middle">22%</text>
+<text x="530" y="208" font-size="11" font-weight="normal" fill="#ffffff" text-anchor="middle">99% in use</text>
+<rect x="582" y="168" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="628" y="190" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="628" y="207" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<rect x="680" y="168" width="92" height="50" rx="6" fill="#d6d5ce"/>
+<text x="726" y="190" font-size="14" font-weight="600" fill="#52514e" text-anchor="middle">killed</text>
+<text x="726" y="207" font-size="11" font-weight="normal" fill="#52514e" text-anchor="middle">OOM killer</text>
+<rect x="14" y="220" width="768" height="58" rx="9" fill="none" stroke="#2a78d6" stroke-width="2.5"/>
+<text x="24" y="246" font-size="15" font-weight="700" fill="#2a78d6" text-anchor="start">t3.medium  ✓ pick</text>
+<text x="24" y="264" font-size="12" font-weight="normal" fill="#52514e" text-anchor="start">4 GiB · $32.70 a month</text>
+<rect x="190" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="236" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="236" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">17% in use</text>
+<rect x="288" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="334" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="334" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">33% in use</text>
+<rect x="386" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="432" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="432" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">49% in use</text>
+<rect x="484" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="530" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="530" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">64% in use</text>
+<rect x="582" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="628" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="628" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">80% in use</text>
+<rect x="680" y="224" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="726" y="247" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0.03%</text>
+<text x="726" y="264" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">95% in use</text>
+<text x="24" y="302" font-size="15" font-weight="700" fill="#0b0b0b" text-anchor="start">t3.large</text>
+<text x="24" y="320" font-size="12" font-weight="normal" fill="#52514e" text-anchor="start">8 GiB · $65.41 a month</text>
+<rect x="190" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="236" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="236" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">9% in use</text>
+<rect x="288" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="334" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="334" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">17% in use</text>
+<rect x="386" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="432" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="432" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">24% in use</text>
+<rect x="484" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="530" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="530" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">32% in use</text>
+<rect x="582" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="628" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="628" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">40% in use</text>
+<rect x="680" y="280" width="92" height="50" rx="6" fill="#e2f3e2"/>
+<text x="726" y="303" font-size="17" font-weight="700" fill="#0b0b0b" text-anchor="middle">0%</text>
+<text x="726" y="320" font-size="11" font-weight="normal" fill="#0b0b0b" text-anchor="middle">48% in use</text>
+<text x="24" y="364" font-size="15" font-weight="700" fill="#0b0b0b" text-anchor="start">For a 1.6 GB app with 25% spare: Choose t3.medium · $32.70 a month</text>
+<text x="24" y="388" font-size="12" font-weight="normal" fill="#898781" text-anchor="start">Green: healthy. Red: critical, every task stalled more than 10% of the time. Grey: the load no longer fit; the OOM killer ended it.</text>
+</svg>
