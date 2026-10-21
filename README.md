@@ -26,7 +26,7 @@ monitor cannot, because a monitor only observes:
 | Your app's own pressure, not just the machine's | Needs cAdvisor and more setup | One setting: `SYSHEALTH_APP=myapp.service`. Tells "raise the container's limit" from "buy a bigger instance" |
 | CPU credits on burstable sizes | No | Give your app's average CPU (measured from its cgroup) and each t2/t3/t4g size is priced with the credits it would burn, or ruled out where it would be throttled |
 | An AI agent can run the experiment | No | An MCP server: "is a t3.small big enough for my app?" is answered by a test, with the evidence and the limits of the answer ([below](#ask-an-ai-agent-mcp)) |
-| Says it in plain words | No | "Choose t3.medium · $30.37 a month. It holds about 3.2 GB before your app slows down…" |
+| Says it in plain words | No | "Choose t3.medium · $32.70 a month. t3.small would save $16.35 a month, but it leaves only 5% spare." |
 
 They also work together: SysHealth serves everything it knows in Prometheus's
 format at `GET /metrics`, the states, the cause data and the last test's verdict
@@ -413,8 +413,8 @@ server from the samples the agents already send, so the dashboard and
    for growth and for the OS cache. A ramp up past your app's peak measures how
    much room each size really leaves; a peak test can only say it held the peak.
 4. **The verdict.** The cheapest size that holds the peak plus the margin, and
-   what the alternatives would mean: "t3.small would save $15.18 a month, but it
-   holds only about 1.4 GB before slowing down."
+   what the alternatives would mean: "t3.small would save $16.35 a month, but it
+   leaves only 5% spare."
 
 The report also says what a usage alarm (memory over 80% in use, the
 usual way) would have bought instead. When the two agree, that is said too.

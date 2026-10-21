@@ -134,7 +134,7 @@ class ToolTest(McpCase):
         self.assertIn("synthetic", text)
         rec = result["structuredContent"]["report"]["recommendation"]
         self.assertEqual(rec["instance_type"], "t3.medium")
-        self.assertEqual(rec["usd_month"], 48.62)   # $30.37 + $18.25 of CPU credits
+        self.assertEqual(rec["usd_month"], 50.95)   # $32.70 + $18.25 of CPU credits
         sizes = result["structuredContent"]["report"]["sizes"]
         self.assertTrue(all(s["levels"] for s in sizes))
         bad = self.tool("rightsize_report", cpu_vcpu="lots")

@@ -77,7 +77,7 @@ class RecommendationTest(unittest.TestCase):
         self.assertEqual(report["need_mb"], 1600)
         self.assertEqual(report["recommendation"]["pick"], "demo-t3-medium")
         self.assertIn("t3.medium", report["recommendation"]["headline"])
-        self.assertIn("$30.37", report["recommendation"]["headline"])
+        self.assertIn("$32.70", report["recommendation"]["headline"])
         # Capacity grows with the size, and the largest never slowed down.
         caps = [rows[t]["capacity"]["mb"] for t in ("t3.micro", "t3.small", "t3.medium")]
         self.assertEqual(caps, sorted(caps))
@@ -85,7 +85,7 @@ class RecommendationTest(unittest.TestCase):
         self.assertEqual(rows["t3.small"]["fit"], "too_small")
         self.assertEqual(rows["t3.medium"]["fit"], "fits")
         # The alternatives are priced from unrounded figures: no stray cent.
-        self.assertIn("would save $15.18 a month", report["recommendation"]["lines"][0])
+        self.assertIn("would save $16.35 a month", report["recommendation"]["lines"][0])
 
     def test_need_and_margin_change_the_answer_without_a_new_test(self):
         report = run_test(RAMP, need=1000, margin=10)
@@ -281,7 +281,7 @@ class CpuTest(unittest.TestCase):
         self.assertEqual(rec["pick"], before["pick"])
         medium = rows_by_type(report)["t3.medium"]
         self.assertAlmostEqual(medium["cpu"]["extra_usd_month"], 18.25)
-        self.assertIn("$48.62", rec["headline"])   # $30.37 + $18.25
+        self.assertIn("$50.95", rec["headline"])   # $32.70 + $18.25
         self.assertTrue(any("CPU credits" in line for line in rec["lines"]))
         self.assertIn("CPU credits", report["prices"]["note"])
         self.assertIsNone(rows_by_type(plain)["t3.medium"]["cpu"])

@@ -66,8 +66,9 @@ PROFILES = [
 # What Ubuntu, the agent and the page cache it cannot give back hold on to.
 OS_OVERHEAD_MB = 350
 
-# Where the simulated fleet "runs", which picks the prices the report uses.
-REGION = "us-east-1"
+# Where the simulated fleet "runs", which picks the prices the report uses:
+# the region of the README's real run, so the demo quotes the same prices.
+REGION = "ap-south-1"
 
 # A background story for when nobody is running a test: idle, a mild spell, idle,
 # one load episode, recovery. A 15-minute cycle, so the default 15m range shows
