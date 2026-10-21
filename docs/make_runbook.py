@@ -45,6 +45,7 @@ H2 = S("h2", fontName="Helvetica-Bold", fontSize=10.4, leading=14,
 BODY = S("b")
 SMALL = S("sm", fontSize=8.5, leading=11.6, textColor=MUTED)
 BULLET = S("bu", leftIndent=11, bulletIndent=2, spaceAfter=3)
+TCELL = S("tc", fontSize=8.6, leading=11.4, spaceAfter=0)
 
 CODE = ParagraphStyle("code", fontName="Courier", fontSize=8.3, leading=11.4,
                       textColor=INK)
@@ -134,213 +135,201 @@ A = story.append
 E = story.extend
 
 A(para("SysHealth — live demo runbook", TITLE))
-A(para("Memory pressure across four EC2 instance sizes. "
-       "Everything below runs from <font face='Courier'>~/syshealth/terraform</font>.", SUB))
+A(para("Four EC2 sizes, one load, one verdict in dollars. "
+       "Every command runs from <font face='Courier'>~/syshealth</font>.", SUB))
 
 # ---- 1
-A(para("1 &nbsp; Fifteen minutes before", H1))
-A(para("Do all of this before anyone is watching. The fleet needs three "
-       "minutes to boot and calibrate, and you want one rehearsal run in hand.", BODY))
-
-A(para("Bring the fleet up", H2))
-E(code("cd ~/syshealth && git pull\n./terraform/relaunch.sh"))
-A(para("Checks your credentials, that the AMI is pinned and the demo tag exists, "
-       "rewrites <font face='Courier'>ssh_cidr</font> to whatever address you are on now, "
-       "then applies and waits until all four sizes report.", SMALL))
-A(expect("a table of four sizes, all <font face='Courier'>online=yes</font>, then a dashboard URL."))
-
-A(para("Rehearse once, then let it settle", H2))
-E(code("""export SYSHEALTH_TOKEN=$(terraform output -raw token)
-curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" \\
-  "$(terraform output -raw dashboard_url)/run-stress"
-sleep 45 && ./check.sh"""))
-A(para("Starting a test needs the fleet's token, which Terraform made. Keep "
-       "<font face='Courier'>terraform output -raw token</font> to hand: the dashboard asks "
-       "for it on the first <b>Start</b>.", SMALL))
-A(expect("micro and small DEGRADED or CRITICAL, medium and large HEALTHY. "
-         "If not, see section 4 before your teacher arrives."))
-A(para("Then wait about two minutes for pressure to fall back to zero, so the live "
-       "run starts from a flat line.", SMALL))
-
-A(PageBreak())
+A(para("1 &nbsp; The day before", H1))
+E(bullets([
+    "<b>Rehearse on the network you will present from.</b> The dashboard only lets in the "
+    "address <font face='Courier'>./aws.sh up</font> ran from, on port 5000, and many campus "
+    "networks block port 5000. Keep a phone hotspot as the way out.",
+    "<b>Have the fallbacks ready:</b> the threshold screenshots, the README's results table, "
+    "and <font face='Courier'>npm run dev</font> working on the laptop (section 5).",
+    "<b>Do not run <font face='Courier'>./aws.sh deploy</font> on the day.</b> The fleet installs "
+    "the code on GitHub, the version already run on AWS.",
+]))
 
 # ---- 2
-A(para("2 &nbsp; The demo", H1))
-
-A(para("Step 1 — Open the dashboard", H2))
-E(code('terraform output -raw dashboard_url    # paste into the browser'))
-A(para("Four cards, all HEALTHY, all green dots, a flat line across the chart.", SMALL))
-E(say("Four EC2 instances, identical software, different sizes: micro at 1 gigabyte "
-      "up to large at 8. Each one reads the kernel's own pressure counter every five "
-      "seconds and reports here. Right now they are all idle."))
-
-A(para("Step 2 — Explain what is being measured", H2))
-E(say("This is PSI — pressure stall information, straight from the Linux kernel. It is "
-      "the percentage of time processes were stalled waiting for memory. Not how much "
-      "memory is used, but how much the machine is struggling to get it. A box can be "
-      "at 90 percent memory and perfectly happy; this measures the pain, not the level."))
-
-A(para("Step 3 — Load all four at once", H2))
-A(para("Open <b>Load test</b>. Leave it on <b>Peak load</b>, 1600 MB for 60 seconds, "
-       "and point at the preview: the peak is 168% of the micro's RAM and 84% of the "
-       "small's. Press <b>Start</b> (pasting the token if it asks). Or from the terminal:", BODY))
-E(code('curl -X POST -H "Authorization: Bearer $SYSHEALTH_TOKEN" \\\n'
-       '  "$(terraform output -raw dashboard_url)/run-stress"'))
-A(para("All four are asked in parallel, within a few milliseconds, so the comparison "
-       "is fair. Each runs the same job: two workers, 800 MB each, for 60 seconds.", SMALL))
-E(say("Same workload, same moment, four different machines. Watch which ones feel it."))
-
-A(para("Step 4 — Watch the separation (60 to 90 seconds)", H2))
-E(table([
-    ["Instance", "RAM", "What happens"],
-    ["t3.micro", "1 GB", "Spikes hard, then the OOM killer ends the job"],
-    ["t3.small", "2 GB", "Climbs and stays there — the worst sustained case"],
-    ["t3.medium", "4 GB", "Barely moves"],
-    ["t3.large", "8 GB", "Flat"],
-], [26 * mm, 16 * mm, 105 * mm]))
-E(say("The 1.6 gigabyte job fits comfortably on medium and large — they never notice it. "
-      "On small it fits, but only just, so the kernel spends the whole minute reclaiming "
-      "memory. That is what pressure looks like."))
-
-A(para("Step 5 — Show one machine on its own", H2))
-A(para("Click <b>t3.small</b> in the Instance toggle. The headline is now one number on "
-       "a Healthy, Degraded, Critical scale.", BODY))
-E(say("That number is the share of the last minute that programs spent waiting for "
-      "memory. Ten percent means one second in every ten was lost. Under ten is healthy, "
-      "ten to forty is degraded, forty or more is critical. Those lines are not ours: "
-      "they come from the systems that act on this signal in production, like Android's "
-      "low-memory killer, systemd-oomd and Meta's oomd. The sources are in the repo."))
-
-A(para("Step 6 — The result: which size to buy", H2))
-A(para("Open <b>Load test</b> again. <b>Which size to choose</b> leads the results: the "
-       "cheapest size that held the app with room to spare, its price a month, and what "
-       "the sizes either side would mean.", BODY))
-E(say("The answer is t3.medium, about 30 dollars a month. The small would save 15 dollars "
-      "but it slows down under this load, and the large costs 30 dollars more for room "
-      "this app does not use. That is a sizing decision made from measurement instead of "
-      "guesswork, and it is said in money."))
-A(para("To show how much room each size leaves, run a <b>Variable load</b> ramp up past "
-       "the app's need (say 200 to 3200 MB, six steps). The <b>Pressure at each load level</b> "
-       "chart then shows where each size gives out, and the table says how much each holds.",
-       SMALL))
-
-A(para("Step 7 — Why, and why not just watch usage", H2))
-A(para("Click <b>t3.small</b> while the test runs. Under the tiles, <b>Where the memory "
-       "is</b> splits the RAM, lists what holds it, and names the likely cause.", BODY))
-E(say("It does not just say the machine is struggling, it says why. On the small, programs "
-      "have taken nearly all the RAM, so the kernel is swapping, or throwing out and "
-      "re-reading the files they run from, and it shows the numbers. And the report checks "
-      "itself against the usual rule, an alarm at 80 percent memory in use, and says when "
-      "that rule would have bought the wrong size."))
+A(para("2 &nbsp; Forty-five minutes before", H1))
+A(para("The fleet needs about five minutes to boot and calibrate, and you want one rehearsal "
+       "run in hand before anyone is watching.", BODY))
+A(para("Bring the fleet up", H2))
+E(code("./aws.sh up --profile hackathon"))
+A(para("It names the account and region, says what it costs and asks before building: about "
+       "$0.19 an hour for the five machines, $0.22 with their addresses and disks.", SMALL))
+A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then the <b>Dashboard</b> "
+         "address and the <b>Token</b>. Copy both."))
+E(code("./aws.sh status"))
+A(expect("four sizes, <font face='Courier'>ONLINE yes</font>, all HEALTHY."))
+A(para("Rehearse once, from the dashboard", H2))
+A(para("Open the Dashboard address. Press <b>Load test</b>, choose <b>Variable load</b> and "
+       "<b>Ramp up</b>. The defaults are the test: your app at its busiest 1600 MB, from 200 to "
+       "3200 MB, 6 steps of 60 seconds. Press <b>Start on 4 instances</b> and paste the token into "
+       "<b>Server token</b> when it asks. The browser keeps the token, so the live run will not "
+       "ask again.", BODY))
+A(para("About seven minutes. It proves the whole chain works and leaves a finished result on "
+       "the page in case the live run goes wrong. Then wait two minutes for the lines to fall "
+       "back to zero. Lost the token?", SMALL))
+E(code("(cd terraform && TF_WORKSPACE=fleet terraform output -raw token)"))
 
 A(PageBreak())
 
 # ---- 3
-A(para("3 &nbsp; Questions you will get", H1))
+A(para("3 &nbsp; The demo, about twelve minutes", H1))
 
-A(para("“Why is small worse than micro? Shouldn't the smallest be worst?”", H2))
-A(para("This is the best question anyone can ask you, and you have the evidence.", BODY))
-E(say("It does not degrade — it fails. The job needs 1.6 gigabytes; micro has 1 plus half "
-      "a gigabyte of swap. It does not fit, so the kernel kills the job outright. Pressure "
-      "collapses because the work stopped, not because the machine coped. Micro's score "
-      "understates the problem. Small is the worst case you can actually observe: big "
-      "enough to accept the work, too small to finish it."))
-A(para("Proof, live, if they want it:", BODY))
-E(code("""MICRO=$(terraform output -json instances | python3 -c \\
-  "import json,sys; print(json.load(sys.stdin)['t3.micro']['public_ip'])")
+A(para("Step 1 — The problem (one minute, no clicking)", H2))
+E(say("Teams pick an instance size by guessing, or by an alarm at 80 percent of memory in "
+      "use. One way they overpay, the other way the app slows down and nobody knows why. "
+      "SysHealth measures it: the same load on four sizes at the same moment, then the "
+      "cheapest size that holds your app, in dollars a month."))
 
-ssh -i $KEY ubuntu@$MICRO \\
-  'sudo journalctl -k --since "20 min ago" | grep -i "killed process"'"""))
-A(para("Prints the kernel's own record of killing the stress job, with a timestamp that "
-       "matches the spike on the chart.", SMALL))
+A(para("Step 2 — The idle fleet", H2))
+A(para("Four cards, all HEALTHY, a flat chart. Open <b>What the number means</b>.", BODY))
+E(say("This number comes from the Linux kernel itself: the share of time programs waited "
+      "for memory. Not how full memory is. Under 10 percent is healthy, 10 to 40 is degraded, "
+      "40 or more is critical, and so is the whole machine stalling 10 percent of the time. "
+      "Those lines come from systems that act on this signal in production: Android's "
+      "low-memory killer, systemd-oomd and Meta's oomd. A state only changes after it has "
+      "held for 15 seconds, so one spike is not a failure."))
+
+A(para("Step 3 — Start the ramp", H2))
+A(para("<b>Load test</b>, <b>Variable load</b>, <b>Ramp up</b>, the same defaults, "
+       "<b>Start on 4 instances</b>.", BODY))
+E(say("Same load, same moment, four machines. It climbs from 200 megabytes to 3.2 "
+      "gigabytes over six minutes. Watch which ones feel it."))
+
+A(para("Step 4 — Talk through the six minutes", H2))
+E(table([
+    ["Minute", "Load", "Point at"],
+    ["1–2", "800 MB", Paragraph("<b>t3.micro turns CRITICAL</b>: 13% waiting at 97% in use. "
+                                "Click it for <b>Where the memory is</b> and the likely cause.", TCELL)],
+    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; its card counts "
+                                "the kills and it keeps reporting. <b>t3.small is 93% in use and "
+                                "still HEALTHY.</b>", TCELL)],
+    ["3–4", "2 GB", Paragraph("<b>t3.small turns CRITICAL</b>: 22% waiting.", TCELL)],
+    ["4–6", "2.6–3.2 GB", Paragraph("<b>t3.medium reaches 95% in use and stays HEALTHY.</b> "
+                                    "t3.large is flat.", TCELL)],
+], [16 * mm, 22 * mm, 127 * mm]))
+A(para("These are the 19 October numbers; a live run lands close to them. States judge a "
+       "one-minute average, so a card turns up to a minute after its step begins. Use the "
+       "quiet stretches for the Prometheus question (section 4).", SMALL))
+E(say("At the 1.4 gigabyte step: look at the small. 93 percent of its memory is in use, so an "
+      "80 percent alarm would be ringing. But nothing is waiting, so nothing is slowed down. "
+      "That is the difference between memory in use and memory pressure."))
+
+A(para("Step 5 — The verdict", H2))
+A(para("Open <b>Load test</b>. <b>Which size to choose</b> leads the results.", BODY))
+E(say("Choose t3.medium, 32 dollars 70 a month. The small would save 16 dollars 35, but it "
+      "holds only about 1.6 gigabytes, 5 percent more than the app needs, and we asked for 25. "
+      "The large costs twice as much for room this app does not use. A sizing decision made "
+      "from measurement, and said in money."))
+A(para("Then point at the <b>Pressure at each load level</b> chart: where a size's line "
+       "crosses the degraded line is the most it can hold. The table under it gives "
+       "<b>Holds up to</b> and <b>Critical from</b> for each size. Change <b>Your app at its "
+       "busiest</b> or <b>Keep spare</b> and the answer is worked out again, without another "
+       "test.", BODY))
+
+A(para("Step 6 — Beyond the dashboard (optional, one minute)", H2))
+A(para("The same verdict from the terminal, instantly, from the test that just ran:", BODY))
+E(code("URL=http://<dashboard-ip>:5000      # ./aws.sh status prints it\n"
+       "python3 cli.py --server $URL report"))
+E(say("The same test runs from the command line, so it can gate a build: it fails when the "
+      "size the app needs has changed. Prometheus can scrape everything at /metrics, and an "
+      "AI agent can run the experiment through an MCP server."))
+A(para("The gate itself takes seven minutes, so name it rather than run it: "
+       "<font face='Courier'>./aws.sh test --need 1600 --ramp 200:3200 --expect t3.medium</font> "
+       "exits 3 when the answer is not t3.medium and 2 when no size fits.", SMALL))
+
+# ---- 4
+A(para("4 &nbsp; Questions you will get", H1))
+
+A(para("“Why does the micro look calm at the end?”", H2))
+E(say("It is not coping, it failed. The load did not fit in its memory and swap, so the "
+      "kernel killed it. Pressure fell because the work stopped. The card counts the kills, "
+      "and the results mark every step after it as critical."))
+A(para("Proof, live, if they want it: the kernel's own record, with times that match the chart.",
+       SMALL))
+E(code("./aws.sh ssh t3.micro 'sudo journalctl -k --since \"20 min ago\" | grep -i killed'"))
+
+A(para("“Why did nothing show DEGRADED?”", H2))
+E(say("On a real machine the change is sudden. Once memory and swap run out, the stall jumps "
+      "past both lines within one step. Both sizes went critical through the whole-machine "
+      "rule: the micro was fully stalled 12.9 percent of the time, the small 21.4. Degraded "
+      "is for an app that is slowed but still working, and this load skipped it."))
 
 A(para("“How is this different from Prometheus and Grafana?”", H2))
 E(say("Prometheus watches. It can graph this same kernel counter, but it never applies a "
-      "load, never knows what load caused a reading, and never tells you what to buy. "
-      "SysHealth runs the same load on every size at once, works out how much each can hold "
-      "before the app slows down, and names the cheapest that fits. They work together, "
-      "too: SysHealth serves all of it, the verdict included, for Prometheus to scrape."))
+      "load, never knows what load caused a reading, and never says what to buy. SysHealth "
+      "runs the same load on every size at once, works out how much each holds before the "
+      "app slows down, and names the cheapest that fits. They work together too: everything, "
+      "the verdict included, is served at /metrics for Prometheus to scrape."))
 
-A(para("“Why not just watch memory usage?”", H2))
-E(say("Usage tells you a number, not whether it hurts. A box sitting at 95 percent with "
-      "nothing to reclaim is fine. A box at 60 percent thrashing is not. PSI measures time "
-      "lost to waiting, which is the thing users actually feel."))
+A(para("“Why not just watch memory in use?”", H2))
+E(say("Because it does not say whether it hurts. At 95 percent in use the medium was stalled "
+      "0.03 percent of the time. At 97 percent the micro was stalled 13 percent. Pressure "
+      "measures time lost to waiting, which is what users feel."))
 
-A(para("“How do the health states work?”", H2))
-E(say("Fixed thresholds on the kernel's stall measurement, the same on every size, because "
-      "the number is already a share of time. Under ten percent is healthy, forty or more, "
-      "or the whole machine frozen ten percent of the time, is critical. They are judged on "
-      "a one-minute average and must hold for fifteen seconds before the state changes, so "
-      "one spike is not reported as a failure. We used to compare against each box's idle "
-      "baseline, but dividing by an idle reading near zero turned a tenth of a percent into "
-      "a critical alarm."))
-
-A(para("“What is it built on?”", H2))
-E(say("Python and Flask. The agent reads /proc/pressure/memory and /proc/vmstat. The chart "
-      "is hand-written SVG, so there is no charting library and nothing loaded from the "
-      "internet. The whole fleet is Terraform — one command builds all five machines."))
+A(para("“A peak test said t3.small. Why does the ramp say t3.medium?”", H2))
+E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes, not how "
+      "much more it could take. The ramp measures the room left, and with 25 percent spare "
+      "asked for, the small's 5 percent rules it out."))
 
 A(para("“Could this run in production?”", H2))
-E(say("The measurement side, yes, and Prometheus can scrape it today. Two things would "
-      "need work first: history is kept in memory and is lost if the server restarts, so it "
-      "would need a real datastore. And the dashboard has no authentication — right now it is "
-      "locked to a single IP address, which is fine for a demo and not for anything real."))
+E(say("The measurement side, yes, and Prometheus can scrape it today. Sending samples and "
+      "starting tests need a shared token, and the dashboard only admits one address. One "
+      "thing would need work first: history is kept in memory, so a restart loses it and a "
+      "real deployment would need a database."))
 
-A(PageBreak())
+A(para("“What is it built on?”", H2))
+E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds; "
+      "the charts are hand-written SVG. The fleet is Terraform: one command builds or "
+      "destroys all five machines."))
 
-# ---- 4
-A(para("4 &nbsp; If something breaks", H1))
+# ---- 5
+A(para("5 &nbsp; If something breaks", H1))
 
 A(para("The dashboard will not load", H2))
-A(para("Almost always your IP address changed — a different network, or the ISP moved you. "
-       "The security group still allows the old one. It fails silently and looks exactly "
-       "like a server that never started.", BODY))
-E(code("./terraform/relaunch.sh    # detects it, fixes only the firewall rule"))
-A(expect("<font face='Courier'>0 to add, 3 to change, 0 to destroy</font>. "
-         "No instance may appear in that plan."))
+A(para("Almost always your address changed: a new network, or a mobile provider moving you "
+       "overnight. Or the network blocks port 5000. It looks exactly like a dead server.", BODY))
+E(code("./aws.sh up --profile hackathon      # moves the firewall to this address"))
+A(expect("<font face='Courier'>0 added, 3 changed, 0 destroyed</font>, about a minute. "
+         "Still nothing: switch to the phone hotspot and run it again."))
+A(para("A phone on the same Wi-Fi as the laptop can open the dashboard too. On mobile data it "
+       "is blocked; show it on the laptop or the projector instead.", SMALL))
 
-A(para("A size is missing from the dashboard", H2))
-E(code("""./check.sh                       # names which sizes are not reporting
-terraform output instances       # public IP of each
-ssh -i $KEY ubuntu@<ip> 'sudo tail -30 /var/log/syshealth-bootstrap.log'
-ssh -i $KEY ubuntu@<ip> 'sudo journalctl -u syshealth -n 30'"""))
-A(para("An agent that is running but cannot reach the dashboard says so in its own log: "
-       "<font face='Courier'>push to http://... failed</font>.", SMALL))
+A(para("A size is missing", H2))
+E(code("""./aws.sh status                      # which sizes are not reporting
+./aws.sh ssh t3.small 'sudo tail -30 /var/log/syshealth-bootstrap.log'
+./aws.sh ssh t3.small 'sudo journalctl -u syshealth -n 30'"""))
 
-A(para("Everything says HEALTHY even under load", H2))
-A(para("The load fits. States are fixed thresholds now, so HEALTHY under load means no "
-       "program waited long enough to matter. Check the <b>Right now</b> tile is moving at "
-       "all, then raise <b>Memory to hold</b> in the Load test form, or run a variable "
-       "ramp to find where each size gives way.", BODY))
-A(para("Flat at 0.00 on every size even while a test runs means stress is not running: "
-       "<font face='Courier'>sudo journalctl -u syshealth -n 30</font> on that box.", SMALL))
+A(para("Start says the token is wrong", H2))
+A(para("Paste it again from the command in section 2. A rebuilt fleet has a new token.", BODY))
 
-A(para("Nothing works and you must present anyway", H2))
-A(para("There is a local simulation that needs no AWS and no network. It serves the real "
-       "dashboard over a simulated four-size fleet, and every page is marked DEMO.", BODY))
-E(code("""cd ~/syshealth
-sudo apt install -y python3-flask python3-requests   # first time only
-npm run dev        # then open http://127.0.0.1:5000"""))
-A(para("Say plainly that it is simulated. The states and thresholds still come from the "
-       "same analysis code that runs on the real instances — only the sensor is faked.", SMALL))
+A(para("Everything stays HEALTHY under load", H2))
+A(para("The load fits: no program waited long enough to matter. Check the <b>Right now</b> tile "
+       "is moving at all, then raise <b>To</b> in the Load test form.", BODY))
 
-A(para("5 &nbsp; Afterwards", H1))
-A(para("Save the evidence before you destroy anything. History lives in the server's memory "
-       "and goes with it. The verdict, as JSON:", BODY))
-E(code("""python3 ../cli.py --server "$(terraform output -raw dashboard_url)" \\
-  report --save ~/syshealth/report-$(date +%F).json"""))
-A(para("And the raw samples:", BODY))
-E(code("""curl -s "$(terraform output -raw dashboard_url)/series?limit=720" \\
-  > ~/syshealth/demo-evidence-$(date +%F).json
+A(para("Nothing on AWS works and you must present anyway", H2))
+A(para("A local simulation needs no AWS and no network. It serves the real dashboard over a "
+       "simulated four-size fleet.", BODY))
+E(code("""sudo apt install -y python3-flask python3-requests   # first time only
+npm run dev                                          # http://127.0.0.1:5000"""))
+A(para("Say plainly that it is simulated (every page says <b>Demo data</b>); the states and "
+       "verdict come from the same code. Then show the screenshots and the README's real results.",
+       SMALL))
 
-terraform destroy
-
-aws ec2 describe-instances --region ap-south-1 \\
-  --filters Name=instance-state-name,Values=running,pending \\
-  --query 'Reservations[].Instances[].[InstanceId,InstanceType]' --output text"""))
-A(expect("empty output from the last command. That means billing has stopped."))
-A(para("Five instances cost roughly US$5 a day and bill until destroyed.", SMALL))
-
+# ---- 6
+A(para("6 &nbsp; Afterwards", H1))
+A(para("Save the evidence first, since history lives in the dashboard's memory and goes with "
+       "it. Then destroy the fleet and check that nothing is left:", BODY))
+E(code("""URL=http://<dashboard-ip>:5000
+python3 cli.py --server $URL report --save rightsize-$(date +%F).json
+curl -s "$URL/series?limit=720" > demo-evidence-$(date +%F).json
+./aws.sh down
+./aws.sh status"""))
+A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "
+         "fleet bills about $0.22 an hour, a little over $5 a day."))
 
 # ------------------------------------------------------------------ build ---
 
