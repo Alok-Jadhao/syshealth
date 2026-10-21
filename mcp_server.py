@@ -300,6 +300,10 @@ def report_limits(report):
     if "unmeasured" in fits or "untested" in fits:
         out.append("Some sizes were never pushed past your app's need plus its margin, so their "
                    "room to spare is unknown: ramp higher to measure it.")
+    untested = (report.get("recommendation") or {}).get("untested")
+    if untested:
+        out.append("%s cost less with the same memory but were not in the test, so nothing here "
+                   "says they hold the app." % " and ".join(u["instance_type"] for u in untested))
     if report.get("cpu_vcpu"):
         out.append("CPU is not measured by this test: it is worked out from each size's vCPUs and "
                    "CPU credits against the average you gave.")

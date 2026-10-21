@@ -132,6 +132,36 @@ def specs(instance_type):
     return _load()["specs"].get(instance_type or "")
 
 
+def processor(instance_type):
+    """Whose processor a size has, from its family's letters after the
+    generation: a "g" is AWS Graviton (Arm), an "a" AMD, anything else Intel."""
+    family = (instance_type or "").split(".")[0]
+    letters = family.lstrip("abcdefghijklmnopqrstuvwxyz").lstrip("0123456789")
+    if "g" in letters:
+        return "Graviton"
+    if "a" in letters:
+        return "AMD"
+    return "Intel"
+
+
+def same_memory(instance_type, region=None):
+    """The other sizes with the same memory and at least as many vCPUs, each
+    with its price in the region, cheapest first. Only sizes the snapshot lists
+    and the region sells (or your prices file names) are known."""
+    spec = specs(instance_type)
+    if not spec or not spec.get("memory_gib"):
+        return []
+    out = []
+    for itype, other in _load()["specs"].items():
+        if itype == instance_type or other.get("memory_gib") != spec["memory_gib"] \
+                or other["vcpu"] < spec["vcpu"]:
+            continue
+        price = lookup(itype, region)
+        if price:
+            out.append(dict(price, instance_type=itype))
+    return sorted(out, key=lambda p: (p["usd_hour"], p["instance_type"]))
+
+
 def burst(instance_type):
     """How a burstable size's CPU credits work, or None if it is not one.
 

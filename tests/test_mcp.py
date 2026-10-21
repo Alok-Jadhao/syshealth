@@ -132,6 +132,7 @@ class ToolTest(McpCase):
         self.assertIn("Choose t3.medium", text)
         self.assertIn("Limits of this answer", text)
         self.assertIn("synthetic", text)
+        self.assertIn("t4g.medium and c6g.large cost less with the same memory but were not in the test", text)
         rec = result["structuredContent"]["report"]["recommendation"]
         self.assertEqual(rec["instance_type"], "t3.medium")
         self.assertEqual(rec["usd_month"], 50.95)   # $32.70 + $18.25 of CPU credits

@@ -414,7 +414,11 @@ server from the samples the agents already send, so the dashboard and
    much room each size really leaves; a peak test can only say it held the peak.
 4. **The verdict.** The cheapest size that holds the peak plus the margin, and
    what the alternatives would mean: "t3.small would save $16.35 a month, but it
-   leaves only 5% spare."
+   leaves only 5% spare." It also names cheaper sizes with the same memory
+   that the test did not run, usually the same size on another maker's
+   processor: "Not tested, with the same 4 GiB: t4g.medium (Graviton) at $16.35
+   a month and t3a.medium (AMD) at $17.96." Only a test can say they hold
+   your app, and Graviton needs an Arm build of it.
 
 The report also says what a usage alarm (memory over 80% in use, the
 usual way) would have bought instead. When the two agree, that is said too.

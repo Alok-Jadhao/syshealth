@@ -410,7 +410,42 @@ def _join(names):
     return ", ".join(names[:-1]) + " and " + names[-1]
 
 
-def recommend(rows, need_mb, margin_pct):
+def untested_cheaper(pick, rows, cpu, margin_pct, limit=2):
+    """Sizes with the pick's memory that would cost less, but the test did not
+    run: mostly the same size with another maker's processor (t4g and t3a for a
+    t3). Priced in the pick's region, CPU credits included when the app's CPU
+    is given; a size whose CPU falls short is left out."""
+    if not pick.get("price"):
+        return []
+    tested = {r["instance_type"] for r in rows}
+    month = _exact_month(pick)
+    out = []
+    for price in pricing.same_memory(pick["instance_type"], pick["price"]["region"]):
+        itype = price["instance_type"]
+        check = cpu_check(itype, cpu, margin_pct) if cpu else None
+        if itype in tested or (check and check["fits"] is False):
+            continue
+        total = price["usd_hour"] * pricing.HOURS_PER_MONTH + (check["extra_usd_month"] if check else 0.0)
+        if total < month - 0.005:
+            out.append({"instance_type": itype, "usd_month": round(total, 2),
+                        "processor": pricing.processor(itype)})
+    return sorted(out, key=lambda r: (r["usd_month"], r["instance_type"]))[:limit]
+
+
+def _untested_line(pick, untested):
+    gib = pricing.specs(pick["instance_type"])["memory_gib"]
+    named = ["%s (%s) at %s" % (u["instance_type"], u["processor"], _money(u["usd_month"]))
+             for u in untested]
+    named[0] += " a month"
+    line = ("Not tested, with the same %g GiB: %s. Add %s to a test before switching"
+            % (gib, _join(named), "it" if len(untested) == 1 else "them"))
+    if pricing.processor(pick["instance_type"]) != "Graviton" and \
+            any(u["processor"] == "Graviton" for u in untested):
+        line += "; Graviton is Arm, so your app needs an Arm build"
+    return line + "."
+
+
+def recommend(rows, need_mb, margin_pct, cpu_vcpu=None):
     """The size to buy, said the way a person would decide it."""
     required = need_mb * (1 + margin_pct / 100.0)
     need_s = loadtest.format_mb(need_mb)
@@ -513,6 +548,12 @@ def recommend(rows, need_mb, margin_pct):
             extra = _exact_month(biggest) - _exact_month(pick)
             out["lines"].append("Against %s, the biggest size tested, that saves %s a month (%s a year)."
                                 % (biggest["instance_type"], _money(extra), _money(extra * 12)))
+
+    # What the test could not say: the same memory for less, on a size it did
+    # not run. Named, not judged; only a test can say it holds the app.
+    out["untested"] = untested_cheaper(pick, rows, cpu_vcpu, margin_pct)
+    if out["untested"]:
+        out["lines"].append(_untested_line(pick, out["untested"]))
     return out
 
 
@@ -645,7 +686,7 @@ def report(snapshot, test_id=None, need_mb=None, margin_pct=None, plans=None, cp
                    "detail": "The recommendation appears when the test finishes. States lag "
                              "the load by up to a minute.", "lines": []}
     elif need:
-        verdict = recommend(rows, need, margin)
+        verdict = recommend(rows, need, margin, cpu)
         if verdict and verdict.get("pick"):
             verdict["usage_rule"] = usage_rule(rows, need, verdict["pick"])
     else:

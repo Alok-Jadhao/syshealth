@@ -309,6 +309,66 @@ class CpuTest(unittest.TestCase):
                             for line in rec["lines"]))
 
 
+class UntestedSizesTest(unittest.TestCase):
+    """The same memory for less, on a size the test did not run."""
+
+    def row(self, itype, host, region="ap-south-1", cpu=None):
+        return {"hostname": host, "instance_type": itype, "mem_total_mb": 4096,
+                "capacity": {"mb": 3200, "kind": "at_least", "held_mb": 3200, "failed_mb": None},
+                "fit": "fits", "spare_pct": 60, "levels": [],
+                "price": pricing.lookup(itype, region),
+                "cpu": rightsize.cpu_check(itype, cpu, 25) if cpu else None}
+
+    def test_processor(self):
+        for itype, maker in (("t3.medium", "Intel"), ("t4g.medium", "Graviton"), ("t3a.small", "AMD"),
+                             ("c6gn.large", "Graviton"), ("m6a.large", "AMD"), ("m7i.large", "Intel")):
+            self.assertEqual(pricing.processor(itype), maker, itype)
+
+    def test_same_memory_and_vcpus_cheapest_first(self):
+        same = pricing.same_memory("t3.medium", "ap-south-1")
+        self.assertEqual([p["instance_type"] for p in same[:2]], ["t4g.medium", "t3a.medium"])
+        self.assertEqual([p["usd_month"] for p in same[:2]], [16.35, 17.96])
+        for p in same:
+            self.assertEqual(pricing.specs(p["instance_type"])["memory_gib"], 4.0)
+            self.assertGreaterEqual(pricing.specs(p["instance_type"])["vcpu"], 2)
+        self.assertNotIn("m6g.medium", [p["instance_type"] for p in same])   # one vCPU
+        self.assertEqual(pricing.same_memory("z9.huge"), [])
+
+    def test_the_verdict_names_them(self):
+        rec = run_test(RAMP)["recommendation"]
+        self.assertEqual(rec["headline"], "Choose t3.medium · $32.70 a month")
+        self.assertEqual([u["instance_type"] for u in rec["untested"]], ["t4g.medium", "t3a.medium"])
+        self.assertIn("Not tested, with the same 4 GiB: t4g.medium (Graviton) at $16.35 a month and "
+                      "t3a.medium (AMD) at $17.96. Add them to a test before switching; Graviton is "
+                      "Arm, so your app needs an Arm build.", rec["lines"])
+
+    def test_a_size_in_the_test_is_not_named(self):
+        rows = [self.row("t4g.medium", "a"), self.row("t3.medium", "b")]
+        rows[0]["fit"] = "too_small"
+        rec = rightsize.recommend(rows, 1600, 25)
+        self.assertEqual(rec["pick"], "b")
+        self.assertEqual([u["instance_type"] for u in rec["untested"]], ["t3a.medium", "c6g.large"])
+        self.assertNotIn("t4g.medium", rec["lines"][-1])
+
+    def test_cpu_credits_are_priced_in(self):
+        # At 0.9 vCPU every burstable size pays for credits, so the c6g.large
+        # (no credits) moves up between the t4g.medium and the t3a.medium.
+        rows = [self.row("t3.medium", "b", cpu=0.9)]
+        rec = rightsize.recommend(rows, 1600, 25, cpu_vcpu=0.9)
+        self.assertEqual(rec["headline"], "Choose t3.medium · $50.95 a month")
+        self.assertEqual(rec["untested"], [
+            {"instance_type": "t4g.medium", "usd_month": 30.95, "processor": "Graviton"},
+            {"instance_type": "c6g.large", "usd_month": 31.1, "processor": "Graviton"}])
+
+    def test_nothing_cheaper_nothing_said(self):
+        rec = rightsize.recommend([self.row("t4g.medium", "a")], 1600, 25)
+        self.assertEqual(rec["untested"], [])
+        self.assertFalse(any(line.startswith("Not tested") for line in rec["lines"]))
+        unpriced = self.row("t3.medium", "b")
+        unpriced["price"] = None
+        self.assertEqual(rightsize.recommend([unpriced], 1600, 25)["untested"], [])
+
+
 class EndpointTest(unittest.TestCase):
 
     def setUp(self):
