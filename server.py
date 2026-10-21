@@ -13,8 +13,11 @@ import instance
 import loadtest
 import prometheus
 import rightsize
+import schema
 
 app = Flask(__name__)
+# Anything bigger is not a sample; Flask answers 413 before reading it.
+app.config["MAX_CONTENT_LENGTH"] = schema.MAX_BODY_BYTES
 
 # One hour of history at one push per 5s, so the dashboard's longest range has
 # something to draw.
@@ -84,7 +87,15 @@ def home():
 
 @app.route("/metrics", methods=["POST"])
 def receive_metrics():
-    data = request.json or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"error": "A sample should be a JSON object."}), 400
+    # Checked before anything is kept: one value of the wrong type used to
+    # break every page until it left the history (schema.py).
+    bad = schema.problem(data)
+    if bad:
+        field, why = bad
+        return jsonify({"error": "%s %s" % (field, why), "field": field}), 422
     hostname = data.get("hostname") or "unknown"
     data["received_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     # Epoch seconds as well, so the dashboard can place samples on a time axis

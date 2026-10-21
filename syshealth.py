@@ -257,6 +257,14 @@ def push_to_server(payload):
             raise requests.exceptions.RequestException(
                 "the server rejected this agent's SYSHEALTH_TOKEN" if TOKEN else
                 "the server needs a token; set SYSHEALTH_TOKEN to the server's")
+        if r.status_code >= 400:
+            # Turned away (422 names the field), so the dashboard did not get it.
+            try:
+                why = r.json().get("error")
+            except (ValueError, AttributeError):
+                why = None
+            raise requests.exceptions.RequestException(
+                "the server turned the sample away (%d): %s" % (r.status_code, why or r.text[:200]))
         if _push_failures:
             print(f"push to {SERVER_URL} recovered after {_push_failures} failures", flush=True)
             _push_failures = 0

@@ -323,7 +323,7 @@ reported as each machine's idle reference, but states no longer depend on it.
 | Method | Endpoint | Description |
 |---|---|---|
 | GET | `/` | Live dashboard |
-| POST | `/metrics` | Agent metric push (token) |
+| POST | `/metrics` | Agent metric push (token). A sample with a field of the wrong type is turned away with 422 and the field's name, so it cannot break the pages |
 | GET | `/metrics` | Everything above for Prometheus to scrape ([below](#with-prometheus)) |
 | GET | `/instances` | All instances with online status and latest metrics |
 | GET | `/instances/<hostname>/history` | Last 60 samples for one instance |
@@ -669,6 +669,7 @@ Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and
 ```
 syshealth/
 ├── server.py          # Flask central server + REST API
+├── schema.py          # What a pushed sample may contain; the server checks each push against it
 ├── syshealth.py       # Agent: collector, analyzer, control server, push client
 ├── analyzer.py        # Sliding-window PSI classifier, thresholds at the top
 ├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, /proc/meminfo
