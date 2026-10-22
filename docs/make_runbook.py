@@ -147,7 +147,7 @@ E(bullets([
     "<b>Have the fallbacks ready:</b> the threshold screenshots, the README's results table, "
     "and <font face='Courier'>npm run dev</font> working on the laptop (section 5).",
     "<b>Do not run <font face='Courier'>./aws.sh deploy</font> on the day.</b> The fleet installs "
-    "the code on GitHub, the version already run on AWS.",
+    "the code on GitHub, the version you rehearsed the day before.",
 ]))
 
 # ---- 2
@@ -170,7 +170,8 @@ A(para("Open the Dashboard address. Press <b>Load test</b>, choose <b>Variable l
        "ask again.", BODY))
 A(para("About seven minutes. It proves the whole chain works and leaves a finished result on "
        "the page in case the live run goes wrong. Then wait two minutes for the lines to fall "
-       "back to zero. Lost the token?", SMALL))
+       "back to zero. Lost the token, or Start says it is wrong? A rebuilt fleet has a new one:",
+       SMALL))
 E(code("(cd terraform && TF_WORKSPACE=fleet terraform output -raw token)"))
 
 A(PageBreak())
@@ -223,7 +224,9 @@ A(para("Open <b>Load test</b>. <b>Which size to choose</b> leads the results.", 
 E(say("Choose t3.medium, 32 dollars 70 a month. The small would save 16 dollars 35, but it "
       "holds only about 1.6 gigabytes, 5 percent more than the app needs, and we asked for 25. "
       "The large costs twice as much for room this app does not use. A sizing decision made "
-      "from measurement, and said in money."))
+      "from measurement, and said in money. Its last line says what it did not test: the same "
+      "4 gigabytes on Graviton or AMD, t4g.medium and t3a.medium, for about half. Those go in "
+      "the next run before anyone switches."))
 A(para("Then point at the <b>Pressure at each load level</b> chart: where a size's line "
        "crosses the degraded line is the most it can hold. The table under it gives "
        "<b>Holds up to</b> and <b>Critical from</b> for each size. Change <b>Your app at its "
@@ -237,9 +240,9 @@ E(code("URL=http://<dashboard-ip>:5000      # ./aws.sh status prints it\n"
 E(say("The same test runs from the command line, so it can gate a build: it fails when the "
       "size the app needs has changed. Prometheus can scrape everything at /metrics, and an "
       "AI agent can run the experiment through an MCP server."))
-A(para("The gate itself takes seven minutes, so name it rather than run it: "
+A(para("Name the gate rather than run it (seven minutes): "
        "<font face='Courier'>./aws.sh test --need 1600 --ramp 200:3200 --expect t3.medium</font> "
-       "exits 3 when the answer is not t3.medium and 2 when no size fits.", SMALL))
+       "exits 3 when the answer changes, 2 when no size fits.", SMALL))
 
 # ---- 4
 A(para("4 &nbsp; Questions you will get", H1))
@@ -275,6 +278,10 @@ E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes
       "much more it could take. The ramp measures the room left, and with 25 percent spare "
       "asked for, the small's 5 percent rules it out."))
 
+A(para("“It names t4g.medium at half the price. Why not pick that?”", H2))
+E(say("It was not tested, and the verdict only picks what it measured. t3a.medium can join "
+      "the next run with --types; Graviton is Arm, so it needs an Arm build first."))
+
 A(para("“Could this run in production?”", H2))
 E(say("The measurement side, yes, and Prometheus can scrape it today. Sending samples and "
       "starting tests need a shared token, and the dashboard only admits one address. One "
@@ -282,9 +289,8 @@ E(say("The measurement side, yes, and Prometheus can scrape it today. Sending sa
       "real deployment would need a database."))
 
 A(para("“What is it built on?”", H2))
-E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds; "
-      "the charts are hand-written SVG. The fleet is Terraform: one command builds or "
-      "destroys all five machines."))
+E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds, the "
+      "charts are hand-written SVG, and Terraform builds or destroys the fleet in one command."))
 
 # ---- 5
 A(para("5 &nbsp; If something breaks", H1))
@@ -293,41 +299,35 @@ A(para("The dashboard will not load", H2))
 A(para("Almost always your address changed: a new network, or a mobile provider moving you "
        "overnight. Or the network blocks port 5000. It looks exactly like a dead server.", BODY))
 E(code("./aws.sh up --profile hackathon      # moves the firewall to this address"))
-A(expect("<font face='Courier'>0 added, 3 changed, 0 destroyed</font>, about a minute. "
-         "Still nothing: switch to the phone hotspot and run it again."))
-A(para("A phone on the same Wi-Fi as the laptop can open the dashboard too. On mobile data it "
-       "is blocked; show it on the laptop or the projector instead.", SMALL))
+A(expect("<font face='Courier'>0 added, 3 changed, 0 destroyed</font>. Still nothing: use the "
+         "phone hotspot and run it again."))
+A(para("A phone on the laptop's Wi-Fi can open it too; on mobile data it is blocked.", SMALL))
 
 A(para("A size is missing", H2))
 E(code("""./aws.sh status                      # which sizes are not reporting
 ./aws.sh ssh t3.small 'sudo tail -30 /var/log/syshealth-bootstrap.log'
 ./aws.sh ssh t3.small 'sudo journalctl -u syshealth -n 30'"""))
 
-A(para("Start says the token is wrong", H2))
-A(para("Paste it again from the command in section 2. A rebuilt fleet has a new token.", BODY))
-
 A(para("Everything stays HEALTHY under load", H2))
-A(para("The load fits: no program waited long enough to matter. Check the <b>Right now</b> tile "
-       "is moving at all, then raise <b>To</b> in the Load test form.", BODY))
+A(para("The load fits. Check the <b>Right now</b> tile moves at all, then raise <b>To</b> in the "
+       "form.", BODY))
 
 A(para("Nothing on AWS works and you must present anyway", H2))
-A(para("A local simulation needs no AWS and no network. It serves the real dashboard over a "
-       "simulated four-size fleet.", BODY))
+A(para("A local simulation needs no AWS and no network: the real dashboard, a simulated fleet.",
+       BODY))
 E(code("""sudo apt install -y python3-flask python3-requests   # first time only
 npm run dev                                          # http://127.0.0.1:5000"""))
-A(para("Say plainly that it is simulated (every page says <b>Demo data</b>); the states and "
-       "verdict come from the same code. Then show the screenshots and the README's real results.",
-       SMALL))
+A(para("Say it is simulated (every page says <b>Demo data</b>), then show the README's real "
+       "results.", SMALL))
 
 # ---- 6
 A(para("6 &nbsp; Afterwards", H1))
-A(para("Save the evidence first, since history lives in the dashboard's memory and goes with "
-       "it. Then destroy the fleet and check that nothing is left:", BODY))
+A(para("Save the evidence first (history lives in the dashboard's memory), then destroy the fleet:",
+       BODY))
 E(code("""URL=http://<dashboard-ip>:5000
 python3 cli.py --server $URL report --save rightsize-$(date +%F).json
 curl -s "$URL/series?limit=720" > demo-evidence-$(date +%F).json
-./aws.sh down
-./aws.sh status"""))
+./aws.sh down && ./aws.sh status"""))
 A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "
          "fleet bills about $0.22 an hour, a little over $5 a day."))
 
