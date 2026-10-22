@@ -863,6 +863,17 @@ main {
   font-weight: 600;
 }
 
+.cmp-load {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-load-label {
+  font-weight: 600;
+}
+
 .cmp-note {
   margin: 6px 0 0;
   color: var(--text-muted);

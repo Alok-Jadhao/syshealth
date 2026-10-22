@@ -66,6 +66,10 @@ PROFILES = [
 # What Ubuntu, the agent and the page cache it cannot give back hold on to.
 OS_OVERHEAD_MB = 350
 
+# Every size above has 2 vCPUs. Ubuntu and the agent keep about 0.03 of one busy.
+VCPUS = 2
+OS_VCPU = 0.03
+
 # Where the simulated fleet "runs", which picks the prices the report uses:
 # the region of the README's real run, so the demo quotes the same prices.
 REGION = "ap-south-1"
@@ -145,6 +149,7 @@ class FakeMachine:
         self.swapins = 0
         self.swapouts = 0
         self.swapped_mb = 0
+        self.load1 = 0.05
         self.rng = random.Random(1234 + index)
         self.diagnoser = Diagnoser()
 
@@ -251,6 +256,24 @@ class FakeMachine:
             # Busier when it holds more: ~0.1 vCPU idle, ~0.45 in the mild spell.
             "cpu_vcpu": round((0.12 + demand / 2000.0) * self.rng.uniform(0.85, 1.15), 3),
         }
+
+    def cpu_for(self, holding, app, some):
+        """How busy the machine is: the collector's `cpu` (busy_pct, load1, vcpus).
+
+        A test's stress workers each keep one vCPU busy while they hold their
+        memory; once the kernel kills them the machine goes back to the app's
+        own light load. Load average is runnable tasks plus those stalled in
+        reclaim, smoothed over a minute as the kernel does.
+        """
+        if holding:
+            busy_vcpu = min(holding["plan"]["workers"], VCPUS) * self.rng.uniform(0.9, 0.98)
+        else:
+            busy_vcpu = app["cpu_vcpu"] + OS_VCPU
+        busy_vcpu = min(float(VCPUS), busy_vcpu)
+        target = busy_vcpu + some / 50.0
+        self.load1 += (target - self.load1) * (1 - math.exp(-TICK_SEC / 60.0))
+        return {"busy_pct": round(100.0 * busy_vcpu / VCPUS, 1),
+                "load1": round(self.load1, 2), "vcpus": VCPUS}
 
     def memory_for(self, demand_mb, held_by):
         """Synthetic /proc/meminfo (kB) and top processes for holding `demand_mb`.
@@ -366,6 +389,7 @@ class FakeMachine:
         full = round(full, 2)
 
         app = self.app_for(ts, current is not None, some)
+        cpu = self.cpu_for(test if current and demand else None, app, some)
         result = self.analyzer.update(some, full, vmstat)
         why = self.diagnoser.update(vmstat, meminfo, top, result, THRESHOLDS,
                                     now=ts, exclude=("stress",))
@@ -376,6 +400,7 @@ class FakeMachine:
             "psi": some,
             "psi_full": full,
             "pressure": other_pressure,
+            "cpu": cpu,
             "instance_type": self.instance_type,
             "instance_id": self.instance_id,
             "region": REGION,

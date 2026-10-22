@@ -269,5 +269,48 @@ class AppTest(unittest.TestCase):
         self.assertIsNone(diagnose.app_verdict(dict(app, psi=2.0), roomy, THRESHOLDS))
 
 
+class MachineLoadTest(unittest.TestCase):
+    """How busy the machine is: CPU from /proc/stat, load from /proc/loadavg."""
+
+    def collector_in(self, root):
+        import collector
+        c = collector.Collector()
+        c.stat_path = os.path.join(root, "stat")
+        c.loadavg_path = os.path.join(root, "loadavg")
+        return c
+
+    def write(self, root, name, body):
+        with open(os.path.join(root, name), "w") as f:
+            f.write(body)
+
+    def test_busy_share_between_two_reads(self):
+        with tempfile.TemporaryDirectory() as root:
+            c = self.collector_in(root)
+            self.write(root, "loadavg", "2.13 1.80 0.95 3/180 4242\n")
+            # user nice system idle iowait irq softirq steal guest guest_nice
+            self.write(root, "stat", "cpu  1000 0 200 8000 100 0 0 0 50 0\ncpu0 1 2 3\n")
+            first = c.read_cpu()
+            self.assertNotIn("busy_pct", first)   # nothing to compare with yet
+            self.assertEqual(first["load1"], 2.13)
+            self.assertGreaterEqual(first["vcpus"], 1)
+            # 1000 more ticks: 700 user, 100 system, 100 idle, 50 iowait, 50 steal.
+            # iowait counts as idle, steal as busy; guest is already inside user.
+            self.write(root, "stat", "cpu  1700 0 300 8100 150 0 0 50 400 0\n")
+            self.assertEqual(c.read_cpu()["busy_pct"], 85.0)
+
+    def test_a_counter_that_went_back_gives_no_share(self):
+        with tempfile.TemporaryDirectory() as root:
+            c = self.collector_in(root)
+            self.write(root, "stat", "cpu  5000 0 0 5000 0 0 0 0 0 0\n")
+            c.read_cpu()
+            self.write(root, "stat", "cpu  10 0 0 10 0 0 0 0 0 0\n")
+            self.assertNotIn("busy_pct", c.read_cpu())
+
+    def test_missing_files_still_say_how_many_vcpus(self):
+        with tempfile.TemporaryDirectory() as root:
+            out = self.collector_in(root).read_cpu()
+        self.assertEqual(set(out), {"vcpus"})
+
+
 if __name__ == "__main__":
     unittest.main()

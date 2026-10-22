@@ -187,10 +187,43 @@
       // Only the newest sample of each instance carries it (server.py).
       diagnosis: raw.diagnosis && typeof raw.diagnosis === 'object' ? raw.diagnosis : null,
       pressure: raw.pressure && typeof raw.pressure === 'object' ? raw.pressure : null,
+      cpu: normalizeCpu(raw.cpu),
       // One app's own cgroup, when the agent runs with SYSHEALTH_APP.
       app: raw.app && typeof raw.app === 'object' && num(raw.app.psi) !== null ? raw.app : null
     };
   }
+
+  // How busy the machine is (collector.read_cpu). Older agents do not send it.
+  function normalizeCpu(raw) {
+    if (!raw || typeof raw !== 'object') {
+      return null;
+    }
+    var cpu = {busy: num(raw.busy_pct), load1: num(raw.load1), vcpus: num(raw.vcpus)};
+    return cpu.busy === null && cpu.load1 === null ? null : cpu;
+  }
+
+  // "CPU 98% · load 2.1 on 2 vCPUs · 80% of memory in use", from what the
+  // sample has. A machine can be flat out and still read 0% waiting for
+  // memory; this says it is working, not idle.
+  function machineLoad(latest) {
+    var parts = [];
+    var cpu = latest && latest.cpu;
+    if (cpu && cpu.busy !== null) {
+      parts.push('CPU ' + formatPct(cpu.busy) + '%');
+    }
+    if (cpu && cpu.load1 !== null) {
+      parts.push('load ' + (Math.round(cpu.load1 * 10) / 10) +
+        (cpu.vcpus ? ' on ' + cpu.vcpus + (cpu.vcpus === 1 ? ' vCPU' : ' vCPUs') : ''));
+    }
+    if (latest && latest.memory) {
+      parts.push(formatPct(latest.memory.used_pct) + '% of memory in use');
+    }
+    return parts.length ? parts.join(' · ') : null;
+  }
+
+  var LOAD_TITLE = 'How busy the machine is: CPU over the last 5 s, the load average ' +
+    'as uptime shows it, and memory in use as most dashboards count it. Busy is not ' +
+    'short of memory: the % waiting for memory says whether it needs more RAM.';
 
   function normalizeThresholds(raw) {
     if (!raw || typeof raw !== 'object') {
@@ -1512,6 +1545,13 @@
       ? testProgress(test, latest) || 'Running'
       : 'No test running';
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
+    var cpu = latest && latest.cpu;
+    $('#tile-load').textContent = cpu && cpu.busy !== null ? 'CPU ' + formatPct(cpu.busy) + '%' : '—';
+    var load = machineLoad(latest);
+    $('#tile-load-note').textContent = load
+      ? load.replace(/^CPU [^·]*· /, '').replace(/^./, function (c) { return c.toUpperCase(); }) +
+        '. Busy is not short of memory: the waiting figure says that.'
+      : 'How busy the machine is. Needs an agent that sends it.';
     renderApp(latest, th);
     renderWhy(latest);
   }
@@ -1675,10 +1715,16 @@
       }
       tile.appendChild(stateRow);
 
-      var note = 'now ' + formatPct(latest.psi) + '% · peak ' + formatPct(peak) + '% in range';
-      if (latest.memory) {
-        note += ' · ' + formatPct(latest.memory.used_pct) + '% in use';
+      var load = machineLoad(latest);
+      if (load) {
+        var loadRow = el('p', 'cmp-load');
+        loadRow.appendChild(el('span', 'cmp-load-label', 'Machine load: '));
+        loadRow.appendChild(document.createTextNode(load));
+        loadRow.title = LOAD_TITLE;
+        tile.appendChild(loadRow);
       }
+
+      var note = 'now ' + formatPct(latest.psi) + '% · peak ' + formatPct(peak) + '% in range';
       if (latest.app) {
         note += ' · app waiting ' + formatPct(num(latest.app.psi)) + '%';
       }

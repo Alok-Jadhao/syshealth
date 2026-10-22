@@ -253,6 +253,7 @@ def summarise(inst, now):
             "full_10s": latest.get("psi_full"),
             "cpu_pressure": (latest.get("pressure") or {}).get("cpu"),
             "io_pressure": (latest.get("pressure") or {}).get("io"),
+            "cpu": latest.get("cpu"),
             "memory": memory or None,
             "cause": diagnosis.get("cause"),
             "leak": diagnosis.get("leak"),

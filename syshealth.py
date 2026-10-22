@@ -332,6 +332,9 @@ def main():
                 "psi_full": data['psi_full'],
                 # CPU and disk I/O pressure, as context; states go by memory.
                 "pressure": data['pressure'],
+                # How busy the machine is (CPU and load average), so a box that is
+                # working hard but not short of memory does not look idle.
+                "cpu": data['cpu'],
                 **result,
                 # What the dashboard groups, orders and colours machines by.
                 "instance_type": identity["instance_type"],

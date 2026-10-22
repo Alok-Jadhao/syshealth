@@ -142,7 +142,9 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
   same band scale, so sizes compare at a glance. During a test, a size whose load
   the kernel killed never turns green again: the kill frees its memory, so once
   its reading drops below critical the card says **Ran out of memory** until the
-  test ends
+  test ends. Each card also has a **Machine load** line: CPU busy, the load
+  average and memory in use. A machine working flat out can still read 0%
+  waiting for memory, and the line shows it is busy, not idle
 - Memory-pressure graph over time, auto-updating, with the one-minute average
   the state is judged on, and the Degraded (10%) and Critical (40%) lines drawn
   in on every view — they are the same for every size
@@ -557,6 +559,13 @@ Each agent also reports CPU and disk I/O pressure, shown beside the memory
 breakdown. States go by memory alone; the other two are context, for example
 when re-reading files from disk costs more in I/O waits than it shows as
 memory pressure.
+
+It reports how busy the machine is too (`cpu` in each sample): the share of CPU
+time not idle since its last push, from `/proc/stat`, and the 1-minute load
+average, as `uptime` shows it. Busy is not short of memory. Running a language
+model on the fleet (Gemma 4 in llama.cpp, which works the CPU hard), t3.medium
+had 80% of its memory in use, yet nothing waited for memory and all 39 requests
+were answered. Without this line its card read 0% and looked idle.
 
 ---
 

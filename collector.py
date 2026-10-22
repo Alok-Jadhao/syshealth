@@ -12,6 +12,9 @@ class Collector:
     def __init__(self):
         self.psi_path = '/proc/pressure/memory'
         self.vmstat_path = '/proc/vmstat'
+        self.stat_path = '/proc/stat'
+        self.loadavg_path = '/proc/loadavg'
+        self._cpu_last = None  # (busy, total) jiffies at the last read
 
     def get_metrics(self):
         some, full = self.read_psi()
@@ -19,6 +22,7 @@ class Collector:
             'psi': some,
             'psi_full': full,
             'pressure': self.read_other_pressure(),
+            'cpu': self.read_cpu(),
             'vmstat': self.read_vmstat(),
             'meminfo': self.read_meminfo(),
             'top': diagnose.top_processes(),
@@ -66,6 +70,42 @@ class Collector:
                                 out[key] = float(parts[1].split('=')[1])
             except (FileNotFoundError, IndexError, ValueError):
                 pass
+        return out
+
+    def read_cpu(self):
+        """How busy the machine is, beside how short of memory it is.
+
+        A machine can be flat out and still read 0% waiting for memory: a
+        model answering requests keeps every vCPU busy while nothing waits for
+        RAM. Showing the load says the machine is working, not idle.
+
+            busy_pct  share of CPU time not idle since the last read, across
+                      all vCPUs (/proc/stat; iowait counts as idle, steal as
+                      busy). Missing on the first read, which has nothing to
+                      compare with.
+            load1     the 1-minute load average, as `uptime` shows it
+            vcpus     so load1 can be read against how many there are
+        """
+        out = {'vcpus': os.cpu_count() or 1}
+        try:
+            with open(self.stat_path, 'r') as f:
+                fields = f.readline().split()
+            # cpu user nice system idle iowait irq softirq steal [guest guest_nice]:
+            # guest time is already inside user and nice, so it is left out.
+            if fields and fields[0] == 'cpu':
+                ticks = [int(v) for v in fields[1:9]]
+                total = sum(ticks)
+                busy = total - ticks[3] - ticks[4]
+                last, self._cpu_last = self._cpu_last, (busy, total)
+                if last and total > last[1] and busy >= last[0]:
+                    out['busy_pct'] = round(100.0 * (busy - last[0]) / (total - last[1]), 1)
+        except (FileNotFoundError, IndexError, ValueError):
+            pass
+        try:
+            with open(self.loadavg_path, 'r') as f:
+                out['load1'] = float(f.read().split()[0])
+        except (FileNotFoundError, IndexError, ValueError):
+            pass
         return out
 
     def read_mem_total_mb(self):
