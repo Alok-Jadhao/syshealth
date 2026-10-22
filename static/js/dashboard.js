@@ -1428,12 +1428,15 @@
 
   // When the OOM killer ends the test load, its memory comes back, pressure
   // falls and the state turns HEALTHY again, though the size could not hold
-  // the load. So for the rest of the test the badge says what happened.
+  // the load. So for the rest of the test, once the reading is no longer
+  // critical, the badge says what happened instead. A critical reading is
+  // still true, and stays.
   var OUT_OF_MEMORY = 'RAN OUT OF MEMORY';
 
   function outOfMemory(inst) {
     var test = inst ? currentTest(inst) : null;
-    return test && test.killed ? test : null;
+    var latest = test ? inst.all[inst.all.length - 1] : null;
+    return test && test.killed && stateKey(latest.state) !== 'critical' ? test : null;
   }
 
   function renderSingleSummary(inst) {

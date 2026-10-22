@@ -205,8 +205,8 @@ E(table([
     ["Minute", "Load", "Point at"],
     ["1–2", "800 MB", Paragraph("<b>t3.micro turns CRITICAL</b>: 13% waiting at 97% in use. "
                                 "Click it for <b>Where the memory is</b> and the likely cause.", TCELL)],
-    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; its card says "
-                                "RAN OUT OF MEMORY and keeps reporting. <b>t3.small is 93% in use "
+    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; as its reading "
+                                "falls, its card says RAN OUT OF MEMORY. <b>t3.small is 93% in use "
                                 "and still HEALTHY.</b>", TCELL)],
     ["3–4", "2 GB", Paragraph("<b>t3.small turns CRITICAL</b>: 22% waiting.", TCELL)],
     ["4–6", "2.6–3.2 GB", Paragraph("<b>t3.medium reaches 95% in use and stays HEALTHY.</b> "
