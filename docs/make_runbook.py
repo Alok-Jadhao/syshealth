@@ -144,8 +144,9 @@ E(bullets([
     "<b>Rehearse on the network you will present from.</b> The dashboard only lets in the "
     "address <font face='Courier'>./aws.sh up</font> ran from, on port 5000, and many campus "
     "networks block port 5000. Keep a phone hotspot as the way out.",
-    "<b>Have the fallbacks ready:</b> the threshold screenshots, the README's results table, "
-    "and <font face='Courier'>npm run dev</font> working on the laptop (section 5).",
+    "<b>Have the fallbacks ready:</b> the threshold screenshots, the 22 October step "
+    "screenshots (<font face='Courier'>~/syshealth-aws-run-2026-10-22/</font>), the README's "
+    "results table, and <font face='Courier'>npm run dev</font> working on the laptop (section 5).",
     "<b>Do not run <font face='Courier'>./aws.sh deploy</font> on the day.</b> The fleet installs "
     "the code on GitHub, the version you rehearsed the day before.",
 ]))
@@ -212,7 +213,8 @@ E(table([
     ["4–6", "2.6–3.2 GB", Paragraph("<b>t3.medium reaches 95% in use and stays HEALTHY.</b> "
                                     "t3.large is flat.", TCELL)],
 ], [16 * mm, 22 * mm, 127 * mm]))
-A(para("These are the 19 October numbers; a live run lands close to them. States judge a "
+A(para("These are the 19 October numbers; the 22 October run matched them within a few "
+       "points. States judge a "
        "one-minute average, so a card turns up to a minute after its step begins. Use the "
        "quiet stretches for the Prometheus question (section 4).", SMALL))
 E(say("At the 1.4 gigabyte step: look at the small. 93 percent of its memory is in use, so an "
@@ -256,10 +258,11 @@ A(para("Proof, live, if they want it: the kernel's own record, with times that m
 E(code("./aws.sh ssh t3.micro 'sudo journalctl -k --since \"20 min ago\" | grep -i killed'"))
 
 A(para("“Why did nothing show DEGRADED?”", H2))
-E(say("On a real machine the change is sudden. Once memory and swap run out, the stall jumps "
-      "past both lines within one step. Both sizes went critical through the whole-machine "
-      "rule: the micro was fully stalled 12.9 percent of the time, the small 21.4. Degraded "
-      "is for an app that is slowed but still working, and this load skipped it."))
+E(say("On a real machine the change is sudden. The test load is the only work on the box, "
+      "so when it waits, everything waits: the whole-machine rule fires at the same moment "
+      "degraded would. A run in 100 megabyte steps caught the small in degraded for about "
+      "four seconds, at 1.8 gigabytes. Degraded is for an app that is slowed but still "
+      "working, with other work that keeps running."))
 
 A(para("“How is this different from Prometheus and Grafana?”", H2))
 E(say("Prometheus watches. It can graph this same kernel counter, but it never applies a "
@@ -318,7 +321,7 @@ A(para("A local simulation needs no AWS and no network: the real dashboard, a si
 E(code("""sudo apt install -y python3-flask python3-requests   # first time only
 npm run dev                                          # http://127.0.0.1:5000"""))
 A(para("Say it is simulated (every page says <b>Demo data</b>), then show the README's real "
-       "results.", SMALL))
+       "results. Its small turns DEGRADED; real machines skip that (section 4).", SMALL))
 
 # ---- 6
 A(para("6 &nbsp; Afterwards", H1))
