@@ -153,6 +153,11 @@ on a `t3.micro` reaches the OOM killer almost at once: one spike and a dead
 process. Swap gives the kernel something to reclaim, and reclaim stalls are
 exactly what PSI measures. Set `swap_mb = 0` to turn it off.
 
+**8 GiB disks on the agents, by default** (`agent_disk_gb`). That holds
+SysHealth and the swapfile. To run a real app on the fleet that brings its own
+files, raise it: a 5 GB model's weights need 20, for example
+`TF_VAR_agent_disk_gb=20 ./aws.sh up`.
+
 **The agent is protected from the OOM killer** (`OOMScoreAdjust=-500`). The
 thing watching the box should outlive the load it was asked to generate.
 `OOMPolicy=continue` keeps it running when the OOM killer takes `stress`.

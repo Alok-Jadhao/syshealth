@@ -293,7 +293,7 @@ resource "aws_instance" "agent" {
 
   root_block_device {
     volume_type = "gp3"
-    volume_size = 8
+    volume_size = var.agent_disk_gb
     encrypted   = true
   }
 

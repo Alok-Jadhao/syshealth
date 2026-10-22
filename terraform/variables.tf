@@ -103,6 +103,12 @@ variable "swap_mb" {
   default     = 512
 }
 
+variable "agent_disk_gb" {
+  description = "Disk size in GiB on each agent. 8 is room for SysHealth and its swapfile; raise it to run a real app on the fleet that brings its own files, such as a model's weights."
+  type        = number
+  default     = 8
+}
+
 variable "calibrate" {
   description = "Run the 60s idle baseline calibration at first boot. The baseline is reported as each machine's idle reference; health states use fixed thresholds (docs/thresholds.md) and do not depend on it."
   type        = bool
