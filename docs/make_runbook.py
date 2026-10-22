@@ -149,8 +149,9 @@ E(bullets([
     "four-state picture (<font face='Courier'>~/syshealth-aws-critical-degraded-healthy.png</font>, "
     "section 4), the README's results table, and <font face='Courier'>npm run dev</font> working "
     "on the laptop (section 5).",
-    "<b>Do not run <font face='Courier'>./aws.sh deploy</font> on the day.</b> The fleet installs "
-    "the code on GitHub, the version you rehearsed the day before.",
+    "<b>Push first, then rehearse.</b> The fleet installs the code on GitHub, so <b>Show all three "
+    "states</b> and the <b>Machine load</b> line appear only once they are pushed. Do not run "
+    "<font face='Courier'>./aws.sh deploy</font> on the day: keep the version you rehearsed.",
 ]))
 
 # ---- 2
@@ -172,8 +173,8 @@ A(para("Open the Dashboard address. Press <b>Load test</b>, choose <b>Variable l
        "<b>Server token</b> when it asks. The browser keeps the token, so the live run will not "
        "ask again.", BODY))
 A(para("About seven minutes. It proves the whole chain works and leaves a finished result on "
-       "the page in case the live run goes wrong. Then wait two minutes for the lines to fall "
-       "back to zero. Lost the token, or Start says it is wrong? A rebuilt fleet has a new one:",
+       "the page in case the live run goes wrong. If step 5b is in the plan, run it once too "
+       "(six minutes). Then wait two minutes for the lines to fall back to zero. Lost the token, or Start says it is wrong? A rebuilt fleet has a new one:",
        SMALL))
 E(code("(cd terraform && TF_WORKSPACE=fleet terraform output -raw token)"))
 
