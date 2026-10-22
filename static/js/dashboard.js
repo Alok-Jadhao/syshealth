@@ -1426,6 +1426,16 @@
     return latest && inst.online && latest.test ? latest.test : null;
   }
 
+  // When the OOM killer ends the test load, its memory comes back, pressure
+  // falls and the state turns HEALTHY again, though the size could not hold
+  // the load. So for the rest of the test the badge says what happened.
+  var OUT_OF_MEMORY = 'RAN OUT OF MEMORY';
+
+  function outOfMemory(inst) {
+    var test = inst ? currentTest(inst) : null;
+    return test && test.killed ? test : null;
+  }
+
   function renderSingleSummary(inst) {
     var latest = inst ? inst.all[inst.all.length - 1] : null;
     var key = latest ? stateKey(latest.state) : 'unknown';
@@ -1439,8 +1449,9 @@
     $('#hero-presence').hidden = !inst;
     $('#hero-psi').textContent = latest ? formatPct(minute) : '—';
     renderScale($('#hero-scale'), minute, th, false);
-    $('#status-text').textContent = latest ? latest.state : 'No data';
-    $('#status-badge').setAttribute('data-state', key);
+    var oom = outOfMemory(inst);
+    $('#status-text').textContent = oom ? OUT_OF_MEMORY : latest ? latest.state : 'No data';
+    $('#status-badge').setAttribute('data-state', oom ? 'critical' : key);
 
     if (latest) {
       var said = describeState(key, minute);
@@ -1462,6 +1473,14 @@
       var appVerdict = latest.app && latest.app.verdict;
       if (appVerdict && appVerdict.action && key === 'healthy') {
         said.action = 'For ' + (latest.app.name || 'your app') + ': ' + appVerdict.action;
+      }
+      if (oom) {
+        said = {
+          meaning: 'The kernel ended the test load ' + oom.killed + '× because it did not fit. ' +
+                   'Each kill frees its memory, so the reading falls though the size could ' +
+                   'not hold the load.',
+          action: 'Choose a bigger size for this load; the verdict at the end of the test names one.'
+        };
       }
       $('#hero-meaning').textContent = (describeWait(minute) + ' ' + said.meaning).trim();
       $('#hero-action').textContent = said.action ? 'What to do: ' + said.action : '';
@@ -1641,11 +1660,16 @@
       renderScale(scale, latest.avgPsi, th, true);
       tile.appendChild(scale);
 
+      var oom = outOfMemory(inst);
       var stateRow = el('p', 'cmp-state');
       var dot = el('span', 'state-dot');
-      dot.setAttribute('data-state', stateKey(latest.state));
+      dot.setAttribute('data-state', oom ? 'critical' : stateKey(latest.state));
       stateRow.appendChild(dot);
-      stateRow.appendChild(el('span', null, latest.state));
+      stateRow.appendChild(el('span', null, oom ? OUT_OF_MEMORY : latest.state));
+      if (oom) {
+        stateRow.title = 'The kernel ended the test load ' + oom.killed + '× because it did ' +
+          'not fit. Reading now: ' + latest.state + '.';
+      }
       tile.appendChild(stateRow);
 
       var note = 'now ' + formatPct(latest.psi) + '% · peak ' + formatPct(peak) + '% in range';

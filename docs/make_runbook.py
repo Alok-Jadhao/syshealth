@@ -205,9 +205,9 @@ E(table([
     ["Minute", "Load", "Point at"],
     ["1–2", "800 MB", Paragraph("<b>t3.micro turns CRITICAL</b>: 13% waiting at 97% in use. "
                                 "Click it for <b>Where the memory is</b> and the likely cause.", TCELL)],
-    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; its card counts "
-                                "the kills and it keeps reporting. <b>t3.small is 93% in use and "
-                                "still HEALTHY.</b>", TCELL)],
+    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; its card says "
+                                "RAN OUT OF MEMORY and keeps reporting. <b>t3.small is 93% in use "
+                                "and still HEALTHY.</b>", TCELL)],
     ["3–4", "2 GB", Paragraph("<b>t3.small turns CRITICAL</b>: 22% waiting.", TCELL)],
     ["4–6", "2.6–3.2 GB", Paragraph("<b>t3.medium reaches 95% in use and stays HEALTHY.</b> "
                                     "t3.large is flat.", TCELL)],
@@ -247,10 +247,10 @@ A(para("Name the gate rather than run it (seven minutes): "
 # ---- 4
 A(para("4 &nbsp; Questions you will get", H1))
 
-A(para("“Why does the micro look calm at the end?”", H2))
+A(para("“Why is the micro's number so low at the end?”", H2))
 E(say("It is not coping, it failed. The load did not fit in its memory and swap, so the "
-      "kernel killed it. Pressure fell because the work stopped. The card counts the kills, "
-      "and the results mark every step after it as critical."))
+      "kernel killed it. Pressure fell because the work stopped. That is why the card says "
+      "ran out of memory, and the results mark every step after it as critical."))
 A(para("Proof, live, if they want it: the kernel's own record, with times that match the chart.",
        SMALL))
 E(code("./aws.sh ssh t3.micro 'sudo journalctl -k --since \"20 min ago\" | grep -i killed'"))

@@ -139,7 +139,9 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
   seconds, programs spent about 1.4 waiting for memory") and what to do about it.
   **What the number means** expands into the three bands.
 - Live cards per instance — green dot (online) / grey dot (offline), RAM, and the
-  same band scale, so sizes compare at a glance
+  same band scale, so sizes compare at a glance. During a test, a size whose load
+  the kernel killed says **Ran out of memory** until the test ends: the kill
+  frees its memory, so its reading alone would turn green again
 - Memory-pressure graph over time, auto-updating, with the one-minute average
   the state is judged on, and the Degraded (10%) and Critical (40%) lines drawn
   in on every view — they are the same for every size
