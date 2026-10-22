@@ -109,6 +109,8 @@ FIELDS = {
     "load_test.load_mb": NUMBER,
     "load_test.stress_killed": COUNT,
     "load_test.remaining_sec": NUMBER,
+    "load_test.background_cpu": FLAG,
+    "load_test.swap_added_mb": COUNT,
     "memory": OBJECT,
     "memory.*": NUMBER,
     "diagnosis": OBJECT,

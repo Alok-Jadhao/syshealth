@@ -165,6 +165,10 @@ def spec_from(args):
         if args.need:
             spec["need_mb"] = args.need
     spec["workers"] = args.workers
+    if args.background:
+        spec["background_cpu"] = True
+    if args.swap:
+        spec["swap_mb"] = args.swap
     return spec
 
 
@@ -332,6 +336,11 @@ def main(argv=None):
     run.add_argument("--steps", type=int, default=6, help="variable: levels (default 6)")
     run.add_argument("--step-sec", type=int, default=60, help="variable: seconds each (default 60)")
     run.add_argument("--workers", type=int, default=2, help="stress workers (default 2)")
+    run.add_argument("--background", action="store_true",
+                     help="keep every vCPU busy at low priority during the test, as a "
+                          "server's other jobs would; lets a size show DEGRADED")
+    run.add_argument("--swap", type=int, metavar="MB", default=0,
+                     help="extra swap on every size for the test, removed after it")
     run.add_argument("--dry-run", action="store_true", help="check the test and say what it does; run nothing")
     verdict_options(run)
     run.set_defaults(func=cmd_run)

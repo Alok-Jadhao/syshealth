@@ -234,10 +234,14 @@ E(say("Choose t3.medium, 32 dollars 70 a month. The small would save 16 dollars 
       "4 gigabytes on Graviton or AMD, t4g.medium and t3a.medium, for about half. Those go in "
       "the next run before anyone switches."))
 A(para("Then point at the <b>Pressure at each load level</b> chart: where a size's line "
-       "crosses the degraded line is the most it can hold. The table under it gives "
-       "<b>Holds up to</b> and <b>Critical from</b> for each size. Change <b>Your app at its "
-       "busiest</b> or <b>Keep spare</b> and the answer is worked out again, without another "
-       "test.", BODY))
+       "crosses the degraded line is the most it can hold. Change <b>Your app at its busiest</b> "
+       "or <b>Keep spare</b> and the answer is worked out again, without another test.", BODY))
+
+A(para("Step 5b — All three states at once (optional, six minutes)", H2))
+A(para("<b>Load test</b>, <b>Show all three states</b>, <b>Start</b>. From about 2½ minutes, for "
+       "about two: micro CRITICAL, small DEGRADED, medium and large HEALTHY.", BODY))
+E(say("A real server has other work that keeps running, so the small is slowed but still "
+      "working: degraded. The medium and large are at 100 percent CPU, and nothing waits."))
 
 A(para("Step 6 — Beyond the dashboard (optional, one minute)", H2))
 A(para("The same verdict from the terminal, instantly, from the test that just ran:", BODY))
@@ -246,9 +250,6 @@ E(code("URL=http://<dashboard-ip>:5000      # ./aws.sh status prints it\n"
 E(say("The same test runs from the command line, so it can gate a build: it fails when the "
       "size the app needs has changed. Prometheus can scrape everything at /metrics, and an "
       "AI agent can run the experiment through an MCP server."))
-A(para("Name the gate rather than run it (seven minutes): "
-       "<font face='Courier'>./aws.sh test --need 1600 --ramp 200:3200 --expect t3.medium</font> "
-       "exits 3 when the answer changes, 2 when no size fits.", SMALL))
 
 # ---- 4
 A(para("4 &nbsp; Questions you will get", H1))
@@ -263,14 +264,10 @@ E(code("./aws.sh ssh t3.micro 'sudo journalctl -k --since \"20 min ago\" | grep 
 
 A(para("“Why did nothing show DEGRADED?”", H2))
 E(say("The test load is the only work on the box, so when it waits, everything waits, and "
-      "the whole-machine rule fires as soon as degraded would. Give it other work and it shows: "
-      "in this real run the micro was critical at 41 percent, the small degraded at 23, the "
-      "medium and large healthy."))
-A(para("Show <font face='Courier'>~/syshealth-aws-critical-degraded-healthy.png</font>. Made the "
-       "same on every size: 2 GB swap (<font face='Courier'>TF_VAR_swap_mb=2048</font>), "
-       "<font face='Courier'>nice -n 19 stress --cpu 2</font> as the app's own work, "
-       "<font face='Courier'>--workers 8</font>, 1.8–2.6 GB. Not on the live fleet: the swap "
-       "changes step 4.", SMALL))
+      "the whole-machine rule fires as soon as degraded would. Give it other work and it shows, "
+      "as step 5b does."))
+A(para("No time: <font face='Courier'>~/syshealth-aws-critical-degraded-healthy.png</font>, 22 October.",
+       SMALL))
 
 A(para("“Does it work on a real app?”", H2))
 E(say("Yes. We ran a language model, Gemma 4 in llama.cpp, on all four sizes. The micro could "
@@ -285,9 +282,8 @@ E(say("Prometheus watches. It can graph this same kernel counter, but it never a
       "the verdict included, is served at /metrics for Prometheus to scrape."))
 
 A(para("“Why not just watch memory in use?”", H2))
-E(say("Because it does not say whether it hurts. At 95 percent in use the medium was stalled "
-      "0.03 percent of the time. At 97 percent the micro was stalled 13 percent. Pressure "
-      "measures time lost to waiting, which is what users feel."))
+E(say("It does not say whether it hurts. At 95 percent in use the medium was stalled 0.03 "
+      "percent of the time; at 97 the micro was stalled 13. Users feel the waiting."))
 
 A(para("“A peak test said t3.small. Why does the ramp say t3.medium?”", H2))
 E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes, not how "
@@ -295,14 +291,12 @@ E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes
       "asked for, the small's 5 percent rules it out."))
 
 A(para("“Could this run in production?”", H2))
-E(say("The measurement side, yes, and Prometheus can scrape it today. Sending samples and "
-      "starting tests need a shared token, and the dashboard only admits one address. One "
-      "thing would need work first: history is kept in memory, so a restart loses it and a "
-      "real deployment would need a database."))
+E(say("The measurement side, yes: Prometheus can scrape it today, and tests need a shared "
+      "token. History is kept in memory, so a real deployment would need a database first."))
 
 A(para("“What is it built on?”", H2))
-E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds, the "
-      "charts are hand-written SVG, and Terraform builds or destroys the fleet in one command."))
+E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds; "
+      "Terraform builds or destroys the fleet in one command."))
 
 # ---- 5
 A(para("5 &nbsp; If something breaks", H1))
@@ -330,15 +324,13 @@ A(para("A local simulation needs no AWS and no network: the real dashboard, a si
 E(code("""sudo apt install -y python3-flask python3-requests   # first time only
 npm run dev                                          # http://127.0.0.1:5000"""))
 A(para("Say it is simulated (every page says <b>Demo data</b>), then show the README's real "
-       "results. Its small turns DEGRADED; real machines only do that with other work running "
-       "(section 4).", SMALL))
+       "results.", SMALL))
 
 # ---- 6
 A(para("6 &nbsp; Afterwards", H1))
-A(para("Save the evidence first (history lives in the dashboard's memory), then destroy the fleet:",
-       BODY))
-E(code("""URL=http://<dashboard-ip>:5000
-python3 cli.py --server $URL report --save rightsize-$(date +%F).json
+A(para("Save the evidence first (history lives in the dashboard's memory; "
+       "<font face='Courier'>URL</font> as in step 6), then destroy the fleet:", BODY))
+E(code("""python3 cli.py --server $URL report --save rightsize-$(date +%F).json
 curl -s "$URL/series?limit=720" > demo-evidence-$(date +%F).json
 ./aws.sh down && ./aws.sh status"""))
 A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "

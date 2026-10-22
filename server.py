@@ -2,6 +2,7 @@ from collections import OrderedDict, defaultdict, deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import hmac
+import json
 import os
 import time
 import uuid
@@ -82,7 +83,8 @@ def require_token():
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    # The preset behind "Show all three states", from the one place it is kept.
+    return render_template("index.html", three_states=json.dumps(loadtest.THREE_STATES_SPEC))
 
 
 @app.route("/metrics", methods=["POST"])

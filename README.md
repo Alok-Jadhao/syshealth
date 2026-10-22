@@ -429,6 +429,34 @@ The plan is built and bounded in one place, `loadtest.py`: up to 16 GB, 16
 workers, steps of 10–1800 s, an hour in all. The agent re-checks every plan
 before running it, because its control port is on the network.
 
+### Like a real server: background work and extra swap
+
+With the test as the only work on a box, a size jumps from HEALTHY straight to
+CRITICAL. PSI is counted per CPU: when the test's processes wait, nothing else
+is running, so the whole machine stalls with them, and the whole-machine rule
+fires at the same moment DEGRADED would. A real server has other work that keeps
+running while one part waits. Two options in the form, the same on every size,
+make the test look like that:
+
+- **Background work**: every vCPU kept busy at the lowest priority for the whole
+  test (`nice -n 19 stress --cpu <vCPUs>`), as a server's other jobs would. It
+  runs whenever the load waits, so the machine is rarely stalled as a whole, and
+  a size can be slowed but still working: DEGRADED.
+- **Extra swap** (up to 4 GB): the agent adds a swap file when the test starts
+  and removes it when the test ends. With the fleet's 512 MB, a size that cannot
+  hold the load is killed within seconds and its reading falls. With more, it
+  slows down instead, and its card stays CRITICAL while it does. The agent
+  checks the disk has room first and keeps 1 GB free.
+
+**Show all three states** fills in the test that did this on a real t3.micro to
+t3.large fleet in ap-south-1 on 22 October 2026: a ramp from 1.8 to 2.6 GB in 5
+steps of 75 s, 8 workers, background work and 2 GB of extra swap. From the third
+step, for about two minutes, t3.micro was CRITICAL (41% waiting), t3.small
+DEGRADED (23%), and t3.medium and t3.large HEALTHY (0%), all at 100% CPU. Each
+card names the background work and the extra swap while the test runs, so the
+setup is never mistaken for the machine on its own. The verdict was t3.medium,
+as without them.
+
 ---
 
 ## Right-sizing: which size to buy
@@ -506,6 +534,7 @@ python3 cli.py status                                   # who is reporting, and 
 python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 python3 cli.py report --need 1200 --margin 30 --cpu 0.5  # the last test, judged again
 python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
+python3 cli.py run --ramp 1800:2600 --steps 5 --step-sec 75 --workers 8 --background --swap 2048
 ```
 
 `run` starts the test on every instance, shows its progress, then prints the

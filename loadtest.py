@@ -30,6 +30,9 @@ LIMITS = {
     "min_steps": 2,
     "max_steps": 20,
     "max_phases": 40,
+    # Extra swap an agent adds for one test and removes after it. A t3 agent
+    # has an 8 GB disk with about 5 GB free; the agent also checks it fits.
+    "max_swap_mb": 4096,
 }
 
 # What the old fixed "Stress all" ran, kept as the default so a bare
@@ -39,6 +42,31 @@ DEFAULT_SPEC = {"mode": "peak", "memory_mb": 1600, "workers": 2, "duration_sec":
 # need_mb is what the app itself uses at its busiest. The right-sizing report
 # judges every size against it. A peak test holds exactly that; a variable
 # test usually goes past it, to see how much room each size leaves.
+
+
+# Two settings that make the box behave like a real server rather than one
+# running only the test:
+#
+#   background_cpu  every vCPU kept busy at the lowest priority for the whole
+#                   test, as a server's other jobs would. PSI is per CPU: with
+#                   only the test load running, when it waits everything waits,
+#                   so "full" rises with "some" and a size goes from HEALTHY
+#                   straight to CRITICAL. With other work that keeps running, a
+#                   size can be slowed but still working: DEGRADED.
+#   swap_mb         extra swap for the test. With the 512 MB a t3 agent has, a
+#                   size that cannot hold the load is killed within seconds and
+#                   its reading falls; with more, it slows down instead, and
+#                   stays CRITICAL while it does.
+#
+# Both are the same on every size, like the rest of the test.
+BACKGROUND_NICE = 19
+
+# The settings that showed CRITICAL, DEGRADED and HEALTHY at the same moment on
+# a real t3.micro, small, medium and large (2026-10-22): the dashboard's "Show
+# all three states" fills the form with these.
+THREE_STATES_SPEC = {"mode": "variable", "pattern": "ramp", "need_mb": 1600,
+                     "low_mb": 1800, "high_mb": 2600, "steps": 5, "step_sec": 75,
+                     "workers": 8, "background_cpu": True, "swap_mb": 2048}
 
 
 class PlanError(ValueError):
@@ -59,6 +87,24 @@ def _int(spec, key, low, high, label):
     if not low <= value <= high:
         raise PlanError("%s must be between %d and %d." % (label, low, high))
     return value
+
+
+def _flag(spec, key):
+    """A checkbox: true, false or missing. "on" and "true" count, as a form sends them."""
+    raw = spec.get(key)
+    if raw in (None, "", False, "false", "off", 0):
+        return False
+    if raw in (True, "true", "on", 1):
+        return True
+    raise PlanError("%s must be true or false." % key.replace("_", " ").capitalize())
+
+
+def _extras(spec):
+    """(background_cpu, swap_mb) from a form or a plan."""
+    swap = 0
+    if spec.get("swap_mb") not in (None, ""):
+        swap = _int(spec, "swap_mb", 0, LIMITS["max_swap_mb"], "Extra swap")
+    return _flag(spec, "background_cpu"), swap
 
 
 def _levels(pattern, low, high, steps):
@@ -117,8 +163,9 @@ def build_plan(spec):
         if phase["mb"] > 0:
             phase["mb"] = per_worker_mb(phase["mb"], workers) * workers
 
+    background, swap = _extras(spec)
     plan = {"mode": mode, "pattern": pattern, "workers": workers, "phases": phases,
-            "need_mb": need}
+            "need_mb": need, "background_cpu": background, "swap_mb": swap}
     return validate_plan(plan)
 
 
@@ -165,6 +212,7 @@ def validate_plan(plan):
     need = None
     if plan.get("need_mb") not in (None, ""):
         need = _int(plan, "need_mb", 1, LIMITS["max_mb"], "Your app's memory")
+    background, swap = _extras(plan)
 
     return {
         "mode": mode,
@@ -174,7 +222,9 @@ def validate_plan(plan):
         "total_sec": total,
         "peak_mb": max(p["mb"] for p in phases),
         "need_mb": need,
-        "summary": summarize(mode, pattern, phases),
+        "background_cpu": background,
+        "swap_mb": swap,
+        "summary": summarize(mode, pattern, phases, background, swap),
     }
 
 
@@ -189,9 +239,21 @@ def stress_argv(workers, mb, seconds):
     ]
 
 
+def background_argv(vcpus, seconds):
+    """Every vCPU busy at the lowest priority for the whole test."""
+    return ["nice", "-n", str(BACKGROUND_NICE), "stress", "--cpu", str(vcpus),
+            "--timeout", "%ds" % seconds]
+
+
 def commands(plan):
     """Each phase as the command line it becomes, for the dashboard to show."""
     out = []
+    if plan.get("swap_mb"):
+        out.append("swapon: %s more swap for this test, removed after it"
+                   % format_mb(plan["swap_mb"]))
+    if plan.get("background_cpu"):
+        out.append(" ".join(background_argv("$(nproc)", plan["total_sec"]))
+                   + "    # all test long")
     for phase in plan["phases"]:
         if phase["mb"] > 0:
             out.append(" ".join(stress_argv(plan["workers"], phase["mb"], phase["seconds"])))
@@ -208,8 +270,17 @@ def format_mb(mb):
     return "%d MB" % mb
 
 
-def summarize(mode, pattern, phases):
+def summarize(mode, pattern, phases, background=False, swap_mb=0):
     """One line a person can read: what this test does to each machine."""
+    extras = ""
+    if background:
+        extras += " · with background work"
+    if swap_mb:
+        extras += " · %s extra swap" % format_mb(swap_mb)
+    return _shape(mode, pattern, phases) + extras
+
+
+def _shape(mode, pattern, phases):
     if mode == "peak":
         p = phases[0]
         return "Peak: %s held for %d s" % (format_mb(p["mb"]), p["seconds"])

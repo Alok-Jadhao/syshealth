@@ -149,6 +149,7 @@ class FakeMachine:
         self.swapins = 0
         self.swapouts = 0
         self.swapped_mb = 0
+        self.extra_swap_mb = 0
         self.load1 = 0.05
         self.rng = random.Random(1234 + index)
         self.diagnoser = Diagnoser()
@@ -212,20 +213,32 @@ class FakeMachine:
         decay = (into - STRESS_RAMP - STRESS_HOLD) / STRESS_DECAY
         return STRESS_MB * max(0.0, 1.0 - decay)
 
-    def pressure_for(self, demand_mb):
+    def pressure_for(self, demand_mb, background=False):
         """Synthetic (some, full) PSI for holding `demand_mb` on this machine.
 
         Nothing until demand nears what is free, then steeply up, saturating
         once it is well past it - stalling is not linear in demand. "full"
         (every task waiting at once) only appears once demand overruns RAM.
+
+        With background work (loadtest.py), the low-priority CPU workers run
+        whenever the load waits: the load gets less CPU, so it waits a little
+        less, and the machine is rarely stalled as a whole. On the real fleet
+        (2026-10-22) "full" was about a tenth of "some".
         """
         if demand_mb <= 0:
             return self.idle, 0.0
         ratio = demand_mb / self.headroom_mb
         x = min(1.0, max(0.0, ratio - 0.6))
         some = self.idle + 75.0 * x ** 1.6
+        if background:
+            some *= 0.7
+            return some, some * 0.12
         full = some * min(0.85, max(0.0, (ratio - 0.95) / 1.5))
         return some, full
+
+    def oom_mb(self, plan):
+        """The load at which the kernel kills the test: RAM, swap and any extra swap."""
+        return self.headroom_mb * OOM_RATIO + (plan.get("swap_mb") or 0)
 
     def app_for(self, ts, testing, machine_some):
         """The app's own cgroup: what SYSHEALTH_APP reports on a real agent.
@@ -257,7 +270,7 @@ class FakeMachine:
             "cpu_vcpu": round((0.12 + demand / 2000.0) * self.rng.uniform(0.85, 1.15), 3),
         }
 
-    def cpu_for(self, holding, app, some):
+    def cpu_for(self, holding, app, some, background=False):
         """How busy the machine is: the collector's `cpu` (busy_pct, load1, vcpus).
 
         A test's stress workers each keep one vCPU busy while they hold their
@@ -265,7 +278,9 @@ class FakeMachine:
         own light load. Load average is runnable tasks plus those stalled in
         reclaim, smoothed over a minute as the kernel does.
         """
-        if holding:
+        if background:
+            busy_vcpu = VCPUS * self.rng.uniform(0.97, 1.0)
+        elif holding:
             busy_vcpu = min(holding["plan"]["workers"], VCPUS) * self.rng.uniform(0.9, 0.98)
         else:
             busy_vcpu = app["cpu_vcpu"] + OS_VCPU
@@ -285,7 +300,8 @@ class FakeMachine:
         total = self.mem_total_mb
         base = sum(rss for _, rss in BASE_PROCESSES)
         room = total - KERNEL_MB - MIN_CACHE_MB
-        swapped = min(SWAP_MB, max(0, base + demand_mb - room))
+        swap_total = SWAP_MB + self.extra_swap_mb
+        swapped = min(swap_total, max(0, base + demand_mb - room))
         programs = min(base + demand_mb, room)
         free_floor = int(total * 0.03)
         cache = max(25, min(int(total * IDLE_CACHE_SHARE), total - programs - KERNEL_MB - free_floor))
@@ -296,7 +312,7 @@ class FakeMachine:
             "MemAvailable": int((free + cache * 0.9) * kb),
             "Buffers": 8 * kb, "Cached": (cache - 8 + 2) * kb, "Shmem": 2 * kb,
             "AnonPages": programs * kb,
-            "SwapTotal": SWAP_MB * kb, "SwapFree": (SWAP_MB - swapped) * kb,
+            "SwapTotal": swap_total * kb, "SwapFree": (swap_total - swapped) * kb,
         }
         self.swapped_mb = swapped
         top = [{"pid": 900 + i, "name": name, "rss_mb": rss}
@@ -328,7 +344,7 @@ class FakeMachine:
             demand = phase["mb"]
             # Too big to fit: the kernel kills stress, and the demand - and
             # with it the pressure - collapses for the rest of the step.
-            if demand / self.headroom_mb >= OOM_RATIO and into >= OOM_AFTER_SEC:
+            if demand >= self.oom_mb(test["plan"]) and into >= OOM_AFTER_SEC:
                 self.killed_phases.add(i)
             if i in self.killed_phases:
                 demand = 0
@@ -342,6 +358,8 @@ class FakeMachine:
                 "steps": len(plan["phases"]),
                 "load_mb": phase["mb"],
                 "stress_killed": len(self.killed_phases),
+                "background_cpu": bool(plan.get("background_cpu")),
+                "swap_added_mb": plan.get("swap_mb") or 0,
                 "remaining_sec": max(0, round(
                     test["started"] + plan["total_sec"] - ts)),
             }
@@ -352,7 +370,9 @@ class FakeMachine:
             if limit:
                 demand = min(demand, limit - APP_BASE_MB)
 
-        some, full = self.pressure_for(demand)
+        background = bool(current and test["plan"].get("background_cpu"))
+        self.extra_swap_mb = (test["plan"].get("swap_mb") or 0) if current else 0
+        some, full = self.pressure_for(demand, background)
         some = max(0.0, some * self.rng.uniform(0.82, 1.18))
         full = min(some, max(0.0, full * self.rng.uniform(0.82, 1.18)))
 
@@ -389,7 +409,7 @@ class FakeMachine:
         full = round(full, 2)
 
         app = self.app_for(ts, current is not None, some)
-        cpu = self.cpu_for(test if current and demand else None, app, some)
+        cpu = self.cpu_for(test if current and demand else None, app, some, background)
         result = self.analyzer.update(some, full, vmstat)
         why = self.diagnoser.update(vmstat, meminfo, top, result, THRESHOLDS,
                                     now=ts, exclude=("stress",))

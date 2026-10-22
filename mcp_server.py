@@ -84,6 +84,11 @@ LOAD_SCHEMA = {
                     "description": "the app's memory at its busiest, MB; every size is judged against it"},
         "workers": {"type": "integer", "minimum": 1, "maximum": 16,
                     "description": "stress workers sharing the memory (default 2)"},
+        "background_cpu": {"type": "boolean",
+                           "description": "keep every vCPU busy at low priority during the test, "
+                                          "as a server's other jobs would; lets a size show DEGRADED"},
+        "swap_mb": {"type": "integer", "minimum": 0, "maximum": 4096,
+                    "description": "extra swap on every size for the test, removed after it"},
     },
     "required": ["shape"],
     "additionalProperties": False,
@@ -92,6 +97,16 @@ LOAD_SCHEMA = {
 
 def load_spec(args):
     """The /run-stress body for a tool's arguments. The server checks the rest."""
+    spec = _load_shape(args)
+    if args.get("background_cpu"):
+        spec["background_cpu"] = True
+    swap = _int(args.get("swap_mb"), "swap_mb")
+    if swap:
+        spec["swap_mb"] = swap
+    return spec
+
+
+def _load_shape(args):
     shape = args.get("shape")
     if shape not in ("peak", "ramp", "wave", "bursts"):
         raise ToolError("shape must be one of peak, ramp, wave or bursts.")

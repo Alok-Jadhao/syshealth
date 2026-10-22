@@ -254,8 +254,23 @@
       steps: num(raw.steps),
       mb: num(raw.load_mb) || 0,
       killed: num(raw.stress_killed) || 0,
-      remaining: num(raw.remaining_sec)
+      remaining: num(raw.remaining_sec),
+      // What the test added around the load (loadtest.py), shown on the card
+      // so nobody mistakes the setup for the machine on its own.
+      background: raw.background_cpu === true,
+      swapAdded: num(raw.swap_added_mb) || 0
     };
+  }
+
+  function testExtras(test) {
+    var parts = [];
+    if (test.background) {
+      parts.push('background work');
+    }
+    if (test.swapAdded) {
+      parts.push('+' + formatMb(test.swapAdded) + ' swap');
+    }
+    return parts.length ? parts.join(' · ') + ' · ' : '';
   }
 
   // The newest thresholds any of these instances reported.
@@ -1542,7 +1557,7 @@
     var test = inst ? currentTest(inst) : null;
     $('#tile-test').textContent = test ? formatMb(test.mb) : 'None';
     $('#tile-test-note').textContent = test
-      ? testProgress(test, latest) || 'Running'
+      ? testExtras(test) + (testProgress(test, latest) || 'Running')
       : 'No test running';
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
     var cpu = latest && latest.cpu;
@@ -1736,7 +1751,8 @@
       var test = currentTest(inst);
       if (test) {
         tile.appendChild(el('p', 'cmp-note cmp-test',
-          'Holding ' + formatMb(test.mb) + ' · ' + (testProgress(test, latest) || 'running')));
+          'Holding ' + formatMb(test.mb) + ' · ' + testExtras(test) +
+          (testProgress(test, latest) || 'running')));
       }
 
       grid.appendChild(tile);
@@ -2153,7 +2169,12 @@
     function value(name) {
       return form.elements[name].value.trim();
     }
-    var spec = { mode: state.testMode, workers: value('workers') };
+    var spec = {
+      mode: state.testMode,
+      workers: value('workers'),
+      background_cpu: form.elements.background_cpu.checked,
+      swap_mb: value('swap_mb')
+    };
     if (state.testMode === 'peak') {
       spec.memory_mb = value('memory_mb');
       spec.duration_sec = value('duration_sec');
@@ -2166,6 +2187,30 @@
       spec.step_sec = value('step_sec');
     }
     return spec;
+  }
+
+  // Fill the form from a spec (the "Show all three states" preset). Picking
+  // the mode and pattern goes through their buttons, so the form updates as
+  // if they had been clicked.
+  function applySpec(spec) {
+    var form = $('#lt-form');
+    var mode = $('#lt-mode [data-mode="' + spec.mode + '"]');
+    if (mode) {
+      mode.click();
+    }
+    var pattern = spec.pattern && $('#lt-pattern [data-pattern="' + spec.pattern + '"]');
+    if (pattern) {
+      pattern.click();
+    }
+    ['memory_mb', 'duration_sec', 'need_mb', 'low_mb', 'high_mb', 'steps', 'step_sec',
+      'workers', 'swap_mb'].forEach(function (name) {
+      if (spec[name] !== undefined && form.elements[name]) {
+        form.elements[name].value = spec[name];
+      }
+    });
+    form.elements.background_cpu.checked = !!spec.background_cpu;
+    syncFormMode();
+    previewSoon();
   }
 
   function syncFormMode() {
@@ -2866,6 +2911,15 @@
       previewSoon();
     });
     form.addEventListener('input', previewSoon);
+    $('#lt-three-states').addEventListener('click', function () {
+      var spec;
+      try {
+        spec = JSON.parse(this.getAttribute('data-spec'));
+      } catch (err) {
+        return;
+      }
+      applySpec(spec);
+    });
     wireToken();
 
     loadReportPrefs();

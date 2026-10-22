@@ -47,6 +47,73 @@ def _make_killable():
         pass
 
 
+# Extra swap a test asked for: added when it starts, removed when it ends. A
+# fixed path, so a file left by a crash is found and removed at the next start.
+TEST_SWAP = "/var/lib/syshealth/test-swap"
+# Never fill the disk: keep this much free beside the swap file.
+SWAP_DISK_SPARE_MB = 1024
+
+
+def _swaps():
+    try:
+        with open("/proc/swaps") as f:
+            return [line.split()[0] for line in f.readlines()[1:] if line.split()]
+    except OSError:
+        return []
+
+
+def add_test_swap(mb, path=TEST_SWAP):
+    """Add `mb` of swap for one test. Returns None, or why it could not."""
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        st = os.statvfs(os.path.dirname(path))
+        free_mb = st.f_bavail * st.f_frsize // (1024 * 1024)
+        if free_mb < mb + SWAP_DISK_SPARE_MB:
+            return "only %d MB of disk free" % free_mb
+        subprocess.run(["fallocate", "-l", "%dM" % mb, path], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=120)
+        os.chmod(path, 0o600)
+        for argv in (["mkswap", path], ["swapon", path]):
+            subprocess.run(argv, check=True, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.PIPE, timeout=120)
+        return None
+    except (OSError, subprocess.SubprocessError) as e:
+        remove_test_swap(path)
+        detail = getattr(e, "stderr", None)
+        return (detail.decode(errors="replace").strip() if detail else str(e)) or type(e).__name__
+
+
+def remove_test_swap(path=TEST_SWAP):
+    """Take the test's swap away again. Its pages come back into RAM first."""
+    if not os.path.exists(path):
+        return
+    if path in _swaps():
+        subprocess.run(["swapoff", path], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, timeout=900)
+        if path in _swaps():
+            print(f"test swap {path} is still in use; left in place", flush=True)
+            return
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _killpg(proc):
+    """End a process started in its own session, and everything it forked."""
+    if proc is None or proc.poll() is not None:
+        return
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+            proc.wait(timeout=3)
+            return
+        except subprocess.TimeoutExpired:
+            continue
+        except ProcessLookupError:
+            return
+
+
 class LoadRunner:
     """Runs one load test at a time: each phase of the plan is one stress run.
 
@@ -95,23 +162,27 @@ class LoadRunner:
     def _kill(self):
         with self._lock:
             proc = self._proc
-        if proc is None or proc.poll() is not None:
-            return
         # stress forks its workers; they share its process group.
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            try:
-                os.killpg(proc.pid, sig)
-                proc.wait(timeout=3)
-                return
-            except subprocess.TimeoutExpired:
-                continue
-            except ProcessLookupError:
-                return
+        _killpg(proc)
 
     def _run(self, test_id, plan):
         ends_at = time.time() + plan["total_sec"]
         killed = 0
+        background = None
+        swap_added = 0
         try:
+            if plan.get("swap_mb"):
+                why_not = add_test_swap(plan["swap_mb"])
+                if why_not:
+                    print(f"load test {test_id}: no extra swap: {why_not}", flush=True)
+                else:
+                    swap_added = plan["swap_mb"]
+            if plan.get("background_cpu"):
+                background = subprocess.Popen(
+                    loadtest.background_argv(os.cpu_count() or 1, plan["total_sec"]),
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True, preexec_fn=_make_killable,
+                )
             for i, phase in enumerate(plan["phases"]):
                 if self._stop.is_set():
                     break
@@ -126,6 +197,9 @@ class LoadRunner:
                     "load_mb": phase["mb"],
                     "stress_killed": killed,
                     "ends_at": ends_at,
+                    # What the test added around the load, so the page can say so.
+                    "background_cpu": background is not None,
+                    "swap_added_mb": swap_added,
                 }
                 if phase["mb"] > 0:
                     proc = subprocess.Popen(
@@ -155,6 +229,9 @@ class LoadRunner:
         finally:
             with self._lock:
                 self._proc = None
+            _killpg(background)
+            if swap_added:
+                remove_test_swap()
             self._status = None
 
 
@@ -283,6 +360,8 @@ def main():
                  "at the server: SYSHEALTH_SERVER_URL=http://SERVER_IP:5000/metrics\n"
                  "(http://127.0.0.1:5000/metrics when the server runs on this machine).")
     if CONTROL:
+        # Swap a test added before the agent last stopped, without seeing it end.
+        remove_test_swap()
         threading.Thread(target=run_control_server, daemon=True).start()
 
     collector = Collector()

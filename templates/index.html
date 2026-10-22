@@ -56,6 +56,12 @@
           </div>
         </div>
         <p class="lt-help" id="lt-mode-help"></p>
+        <div class="lt-preset">
+          <button type="button" class="ghost-btn" id="lt-three-states" data-spec="{{ three_states }}">Show all three states</button>
+          <span class="field-note">Fills in the test that showed CRITICAL, DEGRADED and HEALTHY at the
+            same moment on a real t3.micro to t3.large fleet: 8 workers, background work and 2&nbsp;GB
+            of extra swap, the same on every size.</span>
+        </div>
 
         <div class="lt-fields" data-for="peak">
           <label class="field">
@@ -111,6 +117,16 @@
             <span class="field-label">Parallel workers</span>
             <span class="input-unit"><input type="number" name="workers" value="2" min="1" max="16" step="1" inputmode="numeric"></span>
             <span class="field-note">The memory is split evenly between them</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Background work</span>
+            <span class="input-check"><input type="checkbox" name="background_cpu"><span>Every vCPU busy, low priority</span></span>
+            <span class="field-note">Like a server's other jobs. Without it the test is the only work, so a size goes from healthy straight to critical</span>
+          </label>
+          <label class="field">
+            <span class="field-label">Extra swap</span>
+            <span class="input-unit"><input type="number" name="swap_mb" value="0" min="0" max="4096" step="1" inputmode="numeric"><span>MB</span></span>
+            <span class="field-note">Added for the test, removed after. A size that cannot hold the load slows down instead of being killed</span>
           </label>
         </div>
 
