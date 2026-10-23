@@ -448,14 +448,17 @@ make the test look like that:
   slows down instead, and its card stays CRITICAL while it does. The agent
   checks the disk has room first and keeps 1 GB free.
 
-**Show all three states** fills in the test that did this on a real t3.micro to
-t3.large fleet in ap-south-1 on 22 October 2026: a ramp from 1.8 to 2.6 GB in 5
-steps of 75 s, 8 workers, background work and 2 GB of extra swap. From the third
-step, for about two minutes, t3.micro was CRITICAL (41% waiting), t3.small
-DEGRADED (23%), and t3.medium and t3.large HEALTHY (0%), all at 100% CPU. Each
-card names the background work and the extra swap while the test runs, so the
-setup is never mistaken for the machine on its own. The verdict was t3.medium,
-as without them.
+**Show all three states** fills in the test that does this on a real t3.micro to
+t3.large fleet in ap-south-1: a ramp from 2.1 to 2.4 GB in 5 steps of 75 s, 12
+workers, background work and 2 GB of extra swap. Started from the button on
+23 October 2026, t3.micro was CRITICAL (45-66% waiting), t3.small DEGRADED
+(26-29%), and t3.medium and t3.large HEALTHY (0%) from 80 seconds in to the end
+of the test, all at 100% CPU, with nothing killed. The first setting, 1.8 to
+2.6 GB with 8 workers, kept the micro at 30-36%, just under critical, and showed
+the picture for only 30 seconds to two minutes in three runs. Each card names
+the background work and the extra swap while the test runs, so the setup is
+never mistaken for the machine on its own. The verdict was t3.medium, as
+without them.
 
 ---
 
@@ -534,7 +537,7 @@ python3 cli.py status                                   # who is reporting, and 
 python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 python3 cli.py report --need 1200 --margin 30 --cpu 0.5  # the last test, judged again
 python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
-python3 cli.py run --ramp 1800:2600 --steps 5 --step-sec 75 --workers 8 --background --swap 2048
+python3 cli.py run --ramp 2100:2400 --steps 5 --step-sec 75 --workers 12 --background --swap 2048
 ```
 
 `run` starts the test on every instance, shows its progress, then prints the

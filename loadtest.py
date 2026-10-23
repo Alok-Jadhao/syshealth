@@ -62,11 +62,13 @@ DEFAULT_SPEC = {"mode": "peak", "memory_mb": 1600, "workers": 2, "duration_sec":
 BACKGROUND_NICE = 19
 
 # The settings that showed CRITICAL, DEGRADED and HEALTHY at the same moment on
-# a real t3.micro, small, medium and large (2026-10-22): the dashboard's "Show
-# all three states" fills the form with these.
+# a real t3.micro, small, medium and large: the dashboard's "Show all three
+# states" fills the form with these. On 2026-10-23 a 1.8-2.6 GB ramp with 8
+# workers kept the micro at 30-36% waiting, just under critical, and showed the
+# picture for 30-70 s; 2.1-2.4 GB with 12 workers showed it for over 4 minutes.
 THREE_STATES_SPEC = {"mode": "variable", "pattern": "ramp", "need_mb": 1600,
-                     "low_mb": 1800, "high_mb": 2600, "steps": 5, "step_sec": 75,
-                     "workers": 8, "background_cpu": True, "swap_mb": 2048}
+                     "low_mb": 2100, "high_mb": 2400, "steps": 5, "step_sec": 75,
+                     "workers": 12, "background_cpu": True, "swap_mb": 2048}
 
 
 class PlanError(ValueError):

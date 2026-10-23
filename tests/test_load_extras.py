@@ -53,7 +53,7 @@ class PlanExtrasTest(unittest.TestCase):
 
     def test_summary_and_commands_say_what_was_added(self):
         plan = loadtest.build_plan(loadtest.THREE_STATES_SPEC)
-        self.assertEqual(plan["summary"], "Ramp up: 1.8 GB to 2.5 GB in 5 steps of 75 s"
+        self.assertEqual(plan["summary"], "Ramp up: 2.1 GB to 2.3 GB in 5 steps of 75 s"
                                           " · with background work · 2 GB extra swap")
         commands = loadtest.commands(plan)
         self.assertIn("2 GB more swap", commands[0])
