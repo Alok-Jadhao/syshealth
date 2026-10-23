@@ -146,8 +146,8 @@ E(bullets([
     "networks block port 5000. Keep a phone hotspot as the way out.",
     "<b>Have the fallbacks ready:</b> the threshold screenshots, the 22 October step "
     "screenshots (<font face='Courier'>~/syshealth-aws-run-2026-10-22/</font>), the real "
-    "four-state picture (<font face='Courier'>~/syshealth-aws-critical-degraded-healthy.png</font>, "
-    "section 4), the README's results table, and <font face='Courier'>npm run dev</font> working "
+    "four-state picture, from the button (<font face='Courier'>~/syshealth-aws-three-states-button.png</font>, "
+    "step 5b), the README's results table, and <font face='Courier'>npm run dev</font> working "
     "on the laptop (section 5).",
     "<b>Push first, then rehearse.</b> The fleet installs the code on GitHub, so <b>Show all three "
     "states</b> and the <b>Machine load</b> line appear only once they are pushed. Do not run "
@@ -239,8 +239,9 @@ A(para("Then point at the <b>Pressure at each load level</b> chart: where a size
        "or <b>Keep spare</b> and the answer is worked out again, without another test.", BODY))
 
 A(para("Step 5b — All three states at once (optional, six minutes)", H2))
-A(para("<b>Load test</b>, <b>Show all three states</b>, <b>Start</b>. From about 2½ minutes, for "
-       "about two: micro CRITICAL, small DEGRADED, medium and large HEALTHY.", BODY))
+A(para("<b>Load test</b>, <b>Show all three states</b>, <b>Start</b>. From about a minute and a half "
+       "to the end: micro CRITICAL, small DEGRADED, medium and large HEALTHY. Micro not red by "
+       "step 3? Show the screenshot.", BODY))
 E(say("A real server has other work that keeps running, so the small is slowed but still "
       "working: degraded. The medium and large are at 100 percent CPU, and nothing waits."))
 
@@ -267,7 +268,7 @@ A(para("“Why did nothing show DEGRADED?”", H2))
 E(say("The test load is the only work on the box, so when it waits, everything waits, and "
       "the whole-machine rule fires as soon as degraded would. Give it other work and it shows, "
       "as step 5b does."))
-A(para("No time: <font face='Courier'>~/syshealth-aws-critical-degraded-healthy.png</font>, 22 October.",
+A(para("No time: <font face='Courier'>~/syshealth-aws-three-states-button.png</font>, 22 October.",
        SMALL))
 
 A(para("“Does it work on a real app?”", H2))
