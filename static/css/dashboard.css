@@ -200,7 +200,13 @@ body {
 .topbar-right {
   display: flex;
   align-items: center;
-  gap: 12px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+/* On a phone the row wraps between controls, never inside one. */
+.topbar-right > * {
+  white-space: nowrap;
 }
 
 .feed {
@@ -1576,4 +1582,184 @@ main {
 .state-dot[data-state="critical"] {
   background: var(--status-critical);
   clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%);
+}
+
+/* ---------- explanations (help.js) ----------
+   A ? beside a label, or an underlined label, opens what it means. Quiet
+   until wanted: muted ink, no fill, so a page with fifty of them still reads
+   as the data first. */
+
+.help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0 0 0 2px;
+  padding: 0;
+  border: 1px solid var(--axis);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0;
+  text-transform: none;
+  vertical-align: 1px;
+  cursor: pointer;
+}
+
+.help:hover,
+.help[aria-expanded="true"] {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.help:focus-visible,
+.term:focus-visible,
+.help-pop-close:focus-visible {
+  outline: 2px solid var(--series-psi);
+  outline-offset: 2px;
+}
+
+/* The sample in the guide's first line: the same glyph, not a control. */
+.help-sample {
+  cursor: default;
+}
+
+.term,
+.term-sample {
+  padding: 0;
+  border: 0;
+  border-bottom: 1px dotted currentColor;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+}
+
+.term {
+  cursor: pointer;
+}
+
+.term:hover,
+.term[aria-expanded="true"] {
+  border-bottom-style: solid;
+  color: var(--text-primary);
+}
+
+.help-pop {
+  position: absolute;
+  z-index: 20;
+  max-height: min(70vh, 520px);
+  overflow-y: auto;
+  padding: 12px 14px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-1);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.5;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.help-pop-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.help-pop-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.help-pop-close {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: -4px -6px 0 0;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.help-pop-close:hover {
+  background: var(--hover-wash);
+}
+
+.help-pop p,
+.help-pop ul {
+  margin: 8px 0 0;
+}
+
+.help-pop p {
+  color: var(--text-secondary);
+}
+
+.help-pop ul {
+  padding-left: 18px;
+  color: var(--text-secondary);
+}
+
+.help-pop li + li {
+  margin-top: 4px;
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ---------- the guide card ---------- */
+
+.guide {
+  margin: 0 0 28px;
+  padding: 16px 20px 18px;
+}
+
+/* Its subtitle is a sentence long: Close stays beside it, not under it. */
+.guide .card-head {
+  flex-wrap: nowrap;
+  align-items: flex-start;
+}
+
+.guide-steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px 28px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.guide-steps strong {
+  color: var(--text-primary);
+}
+
+.guide-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 4px;
+  color: var(--text-primary);
+  font-weight: 600;
 }

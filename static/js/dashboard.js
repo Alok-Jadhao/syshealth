@@ -581,6 +581,9 @@
   }
 
   function renderScaleGuide(th) {
+    if (window.SysHealthHelp) {
+      window.SysHealthHelp.setThresholds(th);
+    }
     var list = $('#scale-guide-list');
     clear(list);
     [
@@ -1680,6 +1683,20 @@
     $('#why-leak').textContent = leak ? 'Still growing: ' + leak.text : '';
   }
 
+  // The explanations for parts drawn here, as the page's own have (help.js).
+  // Without help.js they are plain text.
+  function term(key, text) {
+    return window.SysHealthHelp
+      ? window.SysHealthHelp.term(key, text)
+      : el('span', null, text);
+  }
+
+  function helpButton(key, what) {
+    return window.SysHealthHelp
+      ? window.SysHealthHelp.button(key, what)
+      : document.createTextNode('');
+  }
+
   function renderCompareSummary(scoped) {
     var grid = $('#overview-compare');
     clear(grid);
@@ -1712,7 +1729,9 @@
       var value = el('p', 'cmp-value', formatPct(latest.avgPsi));
       value.appendChild(el('span', 'cmp-pct', '%'));
       tile.appendChild(value);
-      tile.appendChild(el('p', 'cmp-unit', 'waiting for memory, last minute'));
+      var unit = el('p', 'cmp-unit');
+      unit.appendChild(term('psi-minute', 'waiting for memory, last minute'));
+      tile.appendChild(unit);
 
       var scale = el('div', 'band-scale band-scale-compact');
       renderScale(scale, latest.avgPsi, th, true);
@@ -1723,7 +1742,7 @@
       var dot = el('span', 'state-dot');
       dot.setAttribute('data-state', oom ? 'critical' : stateKey(latest.state));
       stateRow.appendChild(dot);
-      stateRow.appendChild(el('span', null, oom ? OUT_OF_MEMORY : latest.state));
+      stateRow.appendChild(term('state', oom ? OUT_OF_MEMORY : latest.state));
       if (oom) {
         stateRow.title = 'The kernel ended the test load ' + oom.killed + '× because it did ' +
           'not fit. Reading now: ' + latest.state + '.';
@@ -1733,7 +1752,10 @@
       var load = machineLoad(latest);
       if (load) {
         var loadRow = el('p', 'cmp-load');
-        loadRow.appendChild(el('span', 'cmp-load-label', 'Machine load: '));
+        var loadLabel = el('span', 'cmp-load-label');
+        loadLabel.appendChild(term('machine-load', 'Machine load'));
+        loadLabel.appendChild(document.createTextNode(': '));
+        loadRow.appendChild(loadLabel);
         loadRow.appendChild(document.createTextNode(load));
         loadRow.title = LOAD_TITLE;
         tile.appendChild(loadRow);
@@ -1746,7 +1768,9 @@
       if (!inst.online && inst.secondsSince !== null) {
         note += ' · last seen ' + formatAgo(inst.secondsSince * 1000);
       }
-      tile.appendChild(el('p', 'cmp-note', note));
+      var noteRow = el('p', 'cmp-note', note + ' ');
+      noteRow.appendChild(helpButton('cmp-note', 'the small print'));
+      tile.appendChild(noteRow);
 
       var test = currentTest(inst);
       if (test) {
@@ -2091,9 +2115,42 @@
     }
   }
 
+  // ./aws.sh up and ./aws.sh open bring the token as #token=..., so nobody has
+  // to copy it. Behind the #, the browser never sends it to the server; it is
+  // kept like a typed one and taken out of the address bar.
+  function tokenFromLink() {
+    var match = /(?:^#|&)token=([^&]+)/.exec(window.location.hash);
+    if (!match) {
+      return '';
+    }
+    var token = '';
+    try {
+      token = decodeURIComponent(match[1]).trim();
+    } catch (e) {
+      token = '';
+    }
+    window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    if (token) {
+      try {
+        window.localStorage.setItem(TOKEN_KEY, token);
+      } catch (e) {
+        /* Then it lives in the field until the page is closed. */
+      }
+    }
+    return token;
+  }
+
   function wireToken() {
     var input = $('#lt-token');
-    input.value = savedToken();
+    input.value = tokenFromLink() || savedToken();
+    // The same link opened over a page already open does not reload it.
+    window.addEventListener('hashchange', function () {
+      var token = tokenFromLink();
+      if (token) {
+        input.value = token;
+        $('#lt-token-row').hidden = false;
+      }
+    });
     if (input.value) {
       $('#lt-token-row').hidden = false;
     }

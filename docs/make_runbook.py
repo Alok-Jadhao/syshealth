@@ -149,9 +149,9 @@ E(bullets([
     "four-state picture, from the button (<font face='Courier'>~/syshealth-aws-three-states-button.png</font>, "
     "step 5b), the README's results table, and <font face='Courier'>npm run dev</font> working "
     "on the laptop (section 5).",
-    "<b>Changed any code? Push it before rehearsing.</b> The fleet installs what is on GitHub "
-    "(all pushed on 23 October). Do not run <font face='Courier'>./aws.sh deploy</font> on the "
-    "day: keep the version you rehearsed.",
+    "<b>Changed any code? Push it before rehearsing.</b> The fleet installs what is on GitHub. "
+    "Do not run <font face='Courier'>./aws.sh deploy</font> on the day: keep the version you "
+    "rehearsed.",
 ]))
 
 # ---- 2
@@ -159,24 +159,25 @@ A(para("2 &nbsp; Forty-five minutes before", H1))
 A(para("The fleet needs about five minutes to boot and calibrate, and you want one rehearsal "
        "run in hand before anyone is watching.", BODY))
 A(para("Bring the fleet up", H2))
+A(para("Double-click <b>SysHealth demo on</b> on the desktop, or:", BODY))
 E(code("./aws.sh up --profile hackathon"))
-A(para("It names the account and region, says what it costs and asks before building: about "
-       "$0.19 an hour for the five machines, $0.22 with their addresses and disks.", SMALL))
-A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then the <b>Dashboard</b> "
-         "address and the <b>Token</b>. Copy both."))
+A(para("It names the account and region and what it costs: about $0.19 an hour for the five "
+       "machines, $0.22 with their addresses and disks. The command asks first; the icon does "
+       "not.", SMALL))
+A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then the dashboard opens in "
+         "the browser, signed in."))
 E(code("./aws.sh status"))
 A(expect("four sizes, <font face='Courier'>ONLINE yes</font>, all HEALTHY."))
 A(para("Rehearse once, from the dashboard", H2))
-A(para("Open the Dashboard address. Press <b>Load test</b>, choose <b>Variable load</b> and "
-       "<b>Ramp up</b>. The defaults are the test: your app at its busiest 1600 MB, from 200 to "
-       "3200 MB, 6 steps of 60 seconds. Press <b>Start on 4 instances</b> and paste the token into "
-       "<b>Server token</b> when it asks. The browser keeps the token, so the live run will not "
-       "ask again.", BODY))
+A(para("Press <b>Load test</b>, choose <b>Variable load</b> and <b>Ramp up</b>. The defaults "
+       "are the test: your app at its busiest 1600 MB, from 200 to 3200 MB, 6 steps of 60 "
+       "seconds. Press <b>Start on 4 instances</b>. Every <b>?</b> on the page explains its part, "
+       "and <b>Guide</b>, top right, the whole page.", BODY))
 A(para("About seven minutes. It proves the whole chain works and leaves a finished result on "
        "the page in case the live run goes wrong. If step 5b is in the plan, run it once too "
-       "(six minutes). Then wait two minutes for the lines to fall back to zero. Lost the token, or Start says it is wrong? A rebuilt fleet has a new one:",
+       "(six minutes). Then wait two minutes for the lines to fall back to zero. Closed the tab, or Start says the token is wrong? This opens it again, signed in:",
        SMALL))
-E(code("(cd terraform && TF_WORKSPACE=fleet terraform output -raw token)"))
+E(code("./aws.sh open"))
 
 A(PageBreak())
 
@@ -190,7 +191,8 @@ E(say("Teams pick an instance size by guessing, or by an alarm at 80 percent of 
       "cheapest size that holds your app, in dollars a month."))
 
 A(para("Step 2 — The idle fleet", H2))
-A(para("Four cards, all HEALTHY, a flat chart. Open <b>What the number means</b>.", BODY))
+A(para("Four cards, all HEALTHY, a flat chart. Open <b>What the number means</b>. Asked "
+       "about any part? Its <b>?</b> explains it.", BODY))
 E(say("This number comes from the Linux kernel itself: the share of time programs waited "
       "for memory. Not how full memory is. Under 10 percent is healthy, 10 to 40 is degraded, "
       "40 or more is critical, and so is the whole machine stalling 10 percent of the time. "
@@ -334,7 +336,7 @@ A(para("Save the evidence first (history lives in the dashboard's memory; "
        "<font face='Courier'>URL</font> as in step 6), then destroy the fleet:", BODY))
 E(code("""python3 cli.py --server $URL report --save rightsize-$(date +%F).json
 curl -s "$URL/series?limit=720" > demo-evidence-$(date +%F).json
-./aws.sh down && ./aws.sh status"""))
+./aws.sh down && ./aws.sh status      # or double-click SysHealth demo off"""))
 A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "
          "fleet bills about $0.22 an hour, a little over $5 a day."))
 

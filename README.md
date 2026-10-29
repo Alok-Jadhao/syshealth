@@ -133,6 +133,11 @@ Each agent:
 
 Open `http://YOUR_SERVER_IP:5000` in your browser.
 
+- **Everything explains itself.** A **?** beside every heading, field, tile and
+  table column, and an underlined label on every card line, opens what that
+  part means, how it is measured and what to do about it (the texts are in
+  `static/js/help.js`). **Guide**, top right, opens a six-step "How to read
+  this page", open on a first visit until it is closed.
 - **One number, explained.** The headline is the share of the last minute that
   programs spent waiting for memory, 0–100%. It sits on a Healthy / Degraded /
   Critical band scale, with a plain-English line under it ("out of every 10
@@ -215,17 +220,32 @@ and Terraform. Then:
 
 `up` first says which account and region it will use and what that costs
 (about $0.19 an hour in Mumbai, the default region), and asks before going on.
-It builds the fleet, waits until every size is reporting (about three minutes),
-and prints the dashboard's address and token. There is nothing to prepare by
-hand:
+It builds the fleet, waits until every size is reporting (seven or eight
+minutes), prints the dashboard's address and token, and opens the dashboard in
+your browser already signed in: the token rides after the `#` in the link,
+which the browser never sends to the server, so **Start** works without pasting
+it (`--no-open` skips that; `./aws.sh open` does it again later). There is
+nothing to prepare by hand:
 - **SSH key:** it makes one at `~/.ssh/syshealth_ed25519`.
 - **Firewall:** it lets in only this machine's address.
 - **Account:** it remembers which account it built in, and `down` refuses to
   run against any other.
 
+Or with two clicks, on a Linux desktop:
+
+```bash
+./aws.sh shortcuts --profile NAME   # once: two icons, on the desktop and in the app list
+```
+
+**SysHealth demo on** runs `up --yes` in a terminal and opens the dashboard;
+**SysHealth demo off** runs `down --yes`. Neither asks first. The terminal stays
+open, showing the cost and any error, until you press Enter.
+`./aws.sh shortcuts --remove` takes them away.
+
 While it is up:
 
 ```bash
+./aws.sh open                 # the dashboard in your browser, signed in
 ./aws.sh status               # what is running, since when, what it has cost
 ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # which size to buy
 ./aws.sh ssh t3.small         # a shell on one machine (or: dashboard)
@@ -665,7 +685,10 @@ guarded. Set the same `SYSHEALTH_TOKEN` on the server and every agent:
 - the server wants it to start or stop a test, and passes it on to each
   agent's control port (5001), which refuses anything without it;
 - the dashboard asks for it the first time you press **Start**, and keeps it
-  in that browser only; `cli.py` and the MCP server read `$SYSHEALTH_TOKEN`.
+  in that browser only. Opened as `http://SERVER:5000/#token=<token>`, as
+  `./aws.sh up` and `./aws.sh open` do, it takes it from the link instead, and
+  takes it out of the address bar; `cli.py` and the MCP server read
+  `$SYSHEALTH_TOKEN`.
 
 `terraform/` makes one for each fleet (`terraform output -raw token`), and
 `rightsize.sh` uses it for you. Without a token nothing is checked, as before,
@@ -769,7 +792,8 @@ syshealth/
 │   └── index.html     # Dashboard markup
 ├── static/
 │   ├── css/dashboard.css
-│   └── js/dashboard.js   # Pressure graph and load-test panel, inline SVG — no libraries
+│   ├── js/dashboard.js   # Pressure graph and load-test panel, inline SVG — no libraries
+│   └── js/help.js        # What every part of the page means: the ? texts and the guide
 ├── data/
 │   └── prices.json    # AWS on-demand list prices, dated (tools/update_prices.py)
 ├── tools/

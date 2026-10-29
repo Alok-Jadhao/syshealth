@@ -5,6 +5,7 @@
 #                                  and wait until every size is reporting
 #   ./aws.sh down                  destroy all of it
 #
+#   ./aws.sh open                  the dashboard in your browser, signed in
 #   ./aws.sh status                what is up, since when, and what it has cost
 #   ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 #                                  run the right-sizing test on it (cli.py run)
@@ -12,6 +13,11 @@
 #   ./aws.sh deploy [agents|server]
 #                                  send this working tree to the fleet and
 #                                  restart it, without rebuilding anything
+#   ./aws.sh shortcuts --profile NAME
+#                                  two icons, on the desktop and in the app list:
+#                                  "SysHealth demo on" runs up and opens the
+#                                  dashboard, "SysHealth demo off" runs down
+#                                  (Linux; --remove takes them away again)
 #
 # Options for up:
 #   --profile NAME   AWS CLI profile (default: $AWS_PROFILE, else your default keys)
@@ -19,6 +25,7 @@
 #   --types "A B C"  sizes to compare (default: t3.micro t3.small t3.medium t3.large);
 #                    x86 only, as the image main.tf uses is amd64
 #   --yes            do not ask first (down takes it too)
+#   --no-open        do not open the dashboard in a browser at the end
 #
 # Nothing to prepare but AWS credentials: no key pair (an SSH key is made at
 # ~/.ssh/syshealth_ed25519 on first use) and no terraform.tfvars (one is still
@@ -40,7 +47,7 @@ SAVED=.aws-fleet                   # what up built with; see save_settings
 KNOWN_HOSTS=.aws-fleet-known_hosts # fleet IPs are reused, so not ~/.ssh's
 export TF_IN_AUTOMATION=1
 
-usage() { sed -n '2,30p' "$SELF" | sed 's/^# \{0,1\}//'; }
+usage() { awk 'NR == 1 { next } /^#/ { sub(/^# ?/, ""); print; next } { exit }' "$SELF"; }
 
 tf() { TF_WORKSPACE=$WORKSPACE terraform "$@"; }
 
@@ -92,6 +99,28 @@ set_tf_vars() {   # region, types, cidr
 
 instances_json() { tf output -json instances 2>/dev/null || echo '{}'; }
 
+# The dashboard with its token after the #: the browser never sends that part
+# to the server, and the page keeps it as if it had been typed, so Start works
+# without anyone copying the token.
+signed_in_link() {
+  local url token
+  url=$(tf output -raw dashboard_url 2>/dev/null) && token=$(tf output -raw token 2>/dev/null) ||
+    return 1
+  echo "$url/#token=$token"
+}
+
+# The browser of the desktop this runs on, if it has one. In its own session,
+# so closing the terminal that started it does not close the browser too.
+open_link() {
+  if [ "$(uname)" = Darwin ]; then
+    open "$1"
+  elif command -v xdg-open >/dev/null && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+    setsid -f xdg-open "$1" >/dev/null 2>&1
+  else
+    return 1
+  fi
+}
+
 # How to reach the fleet: its own key (unless terraform.tfvars names a key pair
 # of yours, used from your agent) and its own known_hosts.
 ssh_opts() {
@@ -117,6 +146,7 @@ cmd_up() {
       --region) region=$2; shift 2 ;;
       --types) types=$2; shift 2 ;;
       --yes) YES=1; shift ;;
+      --no-open) NO_OPEN=1; shift ;;
       *) die "up does not take '$1' (see ./aws.sh --help)" ;;
     esac
   done
@@ -171,7 +201,7 @@ cmd_up() {
     die "the build failed (above). Run ./aws.sh up again to retry, or ./aws.sh down to remove what was made."
   fi
 
-  local url token
+  local url token opened
   url=$(tf output -raw dashboard_url)
   token=$(tf output -raw token)
   echo "Waiting for the sizes to install, calibrate and report (five minutes or so; Ctrl-C is safe)..."
@@ -179,11 +209,15 @@ cmd_up() {
     echo "Not every size is reporting yet. It is up all the same; look at one with:"
     echo "  ./aws.sh ssh <size> sudo tail -30 /var/log/syshealth-bootstrap.log"
   fi
+  opened="./aws.sh open opens it signed in"
+  if [ "$NO_OPEN" != 1 ] && open_link "$(signed_in_link)"; then
+    opened="opened in your browser, signed in"
+  fi
   cat <<EOF
 
 SysHealth is up in account $ACCOUNT ($region).
-  Dashboard  $url   (from this machine's address only)
-  Token      $token   (the dashboard asks for it to start a test)
+  Dashboard  $url   ($opened; from this machine's address only)
+  Token      $token   (already filled in on the page ./aws.sh opens)
   Test       ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
   SSH        ./aws.sh ssh dashboard   (or a size: ${types// /, })
   Deploy     ./aws.sh deploy          (this working tree, without rebuilding)
@@ -268,6 +302,81 @@ EOF
     python3 "$SYSHEALTH_ROOT/cli.py" --server "$url" status ||
       echo "(The dashboard did not answer. If this machine's address changed, ./aws.sh up moves the firewall to it.)"
   fi
+}
+
+cmd_open() {
+  [ $# -eq 0 ] || die "open takes nothing (see ./aws.sh --help)"
+  need_tools terraform
+  load_settings
+  [ -n "$S_ACCOUNT" ] || die "nothing is up. Build it first: ./aws.sh up --profile NAME"
+  local link
+  link=$(signed_in_link) || die "the fleet has no dashboard yet. ./aws.sh up finishes it."
+  if open_link "$link"; then
+    echo "Opened the dashboard in your browser, signed in."
+  else
+    echo "No desktop browser here. Open this link, which carries the token:"
+    echo "  $link"
+  fi
+}
+
+# Two launchers: one click runs up and opens the dashboard signed in, one
+# click runs down. Each opens a terminal, so the cost, the progress and any
+# error stay in sight, and waits for Enter before it closes.
+cmd_shortcuts() {
+  local profile="" remove=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --profile) profile=$2; shift 2 ;;
+      --remove) remove=1; shift ;;
+      *) die "shortcuts does not take '$1' (see ./aws.sh --help)" ;;
+    esac
+  done
+  [ "$(uname)" = Linux ] || die "shortcuts are for Linux desktops. Elsewhere: ./aws.sh up and ./aws.sh down."
+  # The command sits inside quotes in the launcher, where these would not survive.
+  case "$SELF$profile" in
+    *[\"\'\`\$\\%]*) die "the path to aws.sh or the profile has a quote, \$, \\ or % in it, which a launcher cannot hold." ;;
+  esac
+  local apps desktop file on=syshealth-demo-on.desktop off=syshealth-demo-off.desktop
+  apps=${XDG_DATA_HOME:-$HOME/.local/share}/applications
+  desktop=$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")
+  # xdg-user-dir answers the home folder itself when there is no desktop folder.
+  { [ "$desktop" != "$HOME" ] && [ -d "$desktop" ]; } || desktop=""
+  if [ "$remove" = 1 ]; then
+    rm -f "$apps/$on" "$apps/$off"
+    [ -z "$desktop" ] || rm -f "$desktop/$on" "$desktop/$off"
+    echo "Removed the SysHealth demo shortcuts."
+    return 0
+  fi
+  mkdir -p "$apps"
+  launcher "$apps/$on" "SysHealth demo on" "Build the SysHealth fleet on AWS and open the dashboard" \
+    "up${profile:+ --profile $profile} --yes" media-playback-start
+  launcher "$apps/$off" "SysHealth demo off" "Destroy the SysHealth fleet on AWS, so it stops billing" \
+    "down --yes" media-playback-stop
+  if [ -n "$desktop" ]; then
+    for file in "$on" "$off"; do
+      cp "$apps/$file" "$desktop/$file"
+      # GNOME runs a launcher on the desktop only once it is marked trusted.
+      gio set "$desktop/$file" metadata::trusted true 2>/dev/null || true
+    done
+  fi
+  echo "Made two shortcuts${profile:+ for profile $profile}, in the app list (press Super, type SysHealth)${desktop:+ and on the desktop}:"
+  echo "  SysHealth demo on    builds the fleet and opens the dashboard, signed in (7 to 8 minutes)"
+  echo "  SysHealth demo off   destroys it, so it stops billing"
+  echo "Neither asks before it acts. ./aws.sh shortcuts --remove takes them away."
+}
+
+launcher() {   # file, name, comment, aws.sh arguments, icon
+  cat > "$1" <<EOF
+[Desktop Entry]
+Type=Application
+Name=$2
+Comment=$3
+Exec=bash -c "'$SELF' $4; echo; read -r -p 'Press Enter to close this window. ' _"
+Icon=$5
+Terminal=true
+Categories=Utility;
+EOF
+  chmod +x "$1"
 }
 
 cmd_test() {
@@ -360,12 +469,15 @@ for name, m in json.load(sys.stdin).items():
 }
 
 YES=0
+NO_OPEN=0
 command=${1:-}
 [ $# -gt 0 ] && shift
 case "$command" in
   up) cmd_up "$@" ;;
   down) cmd_down "$@" ;;
   status) cmd_status "$@" ;;
+  open) cmd_open "$@" ;;
+  shortcuts) cmd_shortcuts "$@" ;;
   test) cmd_test "$@" ;;
   ssh) cmd_ssh "$@" ;;
   deploy) cmd_deploy "$@" ;;

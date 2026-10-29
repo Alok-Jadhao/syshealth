@@ -8,6 +8,11 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
 </head>
 <body>
+  {#- A ? that opens the explanation kept under key in static/js/help.js. -#}
+  {% macro help(key, what) -%}
+    <button type="button" class="help" data-help="{{ key }}" aria-label="Explain {{ what }}" aria-expanded="false">?</button>
+  {%- endmacro %}
+
   <!-- Shown only when the server is dev.py, which serves /dev-mode. server.py
        has no such route, so this stays hidden wherever real agents report. -->
   <p class="demo-banner" id="demo-banner" role="status" hidden>
@@ -22,8 +27,10 @@
       <span class="brand-name">SysHealth</span>
     </div>
     <div class="topbar-right">
-      <p class="feed" id="feed-status" aria-live="polite">Connecting&hellip;</p>
+      <p class="feed"><span id="feed-status" aria-live="polite">Connecting&hellip;</span> {{ help('feed', 'how fresh this is') }}</p>
       <button type="button" class="test-chip" id="test-chip" hidden></button>
+      <button type="button" class="ghost-btn" id="guide-toggle"
+              aria-expanded="false" aria-controls="guide">Guide</button>
       <button type="button" class="stress-btn" id="loadtest-toggle"
               aria-expanded="false" aria-controls="loadtest-panel">&#9889; Load test</button>
       <button type="button" class="ghost-btn" id="theme-toggle" aria-label="Switch colour theme">
@@ -33,12 +40,62 @@
   </header>
 
   <main>
+    <!-- The page in six lines, for anyone seeing it for the first time. Open
+         on a first visit; help.js remembers when it is closed. -->
+    <section class="card guide" id="guide" aria-labelledby="guide-heading" hidden>
+      <div class="card-head">
+        <div>
+          <h2 class="card-title" id="guide-heading">How to read this page</h2>
+          <p class="card-subtitle">
+            SysHealth answers one question: which instance size has enough memory
+            for your app? Every <span class="help help-sample" aria-hidden="true">?</span>
+            and every <span class="term-sample">underlined label</span> on the page
+            explains the part next to it.
+          </p>
+        </div>
+        <button type="button" class="ghost-btn" id="guide-close">Close</button>
+      </div>
+      <ol class="guide-steps">
+        <li>
+          <strong>The measure.</strong> Each machine reports how much of the time its
+          programs spend <em>waiting</em> for memory, not how full its memory is. A full
+          machine can be fine; a machine whose programs wait is slow. Lower is better.
+        </li>
+        <li>
+          <strong>Three states.</strong>
+          <span class="guide-state"><span class="state-dot" data-state="healthy"></span>Healthy</span>
+          under <span data-th="degraded">10</span>%: enough memory.
+          <span class="guide-state"><span class="state-dot" data-state="degraded"></span>Degraded</span>
+          <span data-th="degraded">10</span>&ndash;<span data-th="critical">40</span>%: noticeably slower.
+          <span class="guide-state"><span class="state-dot" data-state="critical"></span>Critical</span>
+          <span data-th="critical">40</span>% or more: thrashing, and the kernel may start killing programs.
+        </li>
+        <li>
+          <strong>Current state</strong> shows every machine as it is now, one card each,
+          from the smallest size to the biggest.
+        </li>
+        <li>
+          <strong>The chart</strong> shows the same reading over time. <em>Range</em> picks
+          how far back; <em>Instance</em> picks one machine to look at closely.
+        </li>
+        <li>
+          <strong>Load test</strong>, top right, puts the same memory load on every machine
+          at once, so you can watch the small ones struggle first.
+          <em>Show all three states</em> fills in a test that shows all three at the same moment.
+        </li>
+        <li>
+          <strong>Which size to choose</strong> appears under the test form once a test has
+          run: the cheapest size that held your app with room to spare, and what it costs.
+        </li>
+      </ol>
+    </section>
+
     <!-- The load test form. Collapsed until asked for: most visits are to
          look, not to load the fleet. -->
     <section class="card loadtest" id="loadtest-panel" aria-labelledby="loadtest-heading" hidden>
       <div class="card-head">
         <div>
-          <h2 class="card-title" id="loadtest-heading">Load test</h2>
+          <h2 class="card-title" id="loadtest-heading">Load test {{ help('loadtest', 'the load test') }}</h2>
           <p class="card-subtitle">
             Make every reporting instance hold the memory your app needs, at the
             same moment, and see which sizes cope.
@@ -54,23 +111,24 @@
             <button type="button" role="radio" data-mode="peak" aria-checked="true" class="is-selected">Peak load</button>
             <button type="button" role="radio" data-mode="variable" aria-checked="false">Variable load</button>
           </div>
+          {{ help('test-type', 'the test types') }}
         </div>
         <p class="lt-help" id="lt-mode-help"></p>
         <div class="lt-preset">
           <button type="button" class="ghost-btn" id="lt-three-states" data-spec="{{ three_states }}">Show all three states</button>
+          {{ help('three-states', 'Show all three states') }}
           <span class="field-note">Fills in the test that showed CRITICAL, DEGRADED and HEALTHY at the
-            same moment on a real t3.micro to t3.large fleet: 8 workers, background work and 2&nbsp;GB
-            of extra swap, the same on every size.</span>
+            same moment on a real t3.micro to t3.large fleet, the same on every size.</span>
         </div>
 
         <div class="lt-fields" data-for="peak">
           <label class="field">
-            <span class="field-label">Memory to hold</span>
+            <span class="field-label">Memory to hold {{ help('memory_mb', 'Memory to hold') }}</span>
             <span class="input-unit"><input type="number" name="memory_mb" value="1600" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">What your app uses at its busiest</span>
           </label>
           <label class="field">
-            <span class="field-label">Hold it for</span>
+            <span class="field-label">Hold it for {{ help('duration_sec', 'Hold it for') }}</span>
             <span class="input-unit"><input type="number" name="duration_sec" value="60" min="10" max="1800" step="1" inputmode="numeric"><span>seconds</span></span>
             <span class="field-note">10 to 1800</span>
           </label>
@@ -78,7 +136,7 @@
 
         <div class="lt-fields" data-for="variable" hidden>
           <div class="field field-wide">
-            <span class="field-label" id="lt-pattern-label">Pattern</span>
+            <span class="field-label"><span id="lt-pattern-label">Pattern</span> {{ help('pattern', 'the patterns') }}</span>
             <div class="segmented" id="lt-pattern" role="radiogroup" aria-labelledby="lt-pattern-label">
               <button type="button" role="radio" data-pattern="ramp" aria-checked="true" class="is-selected">Ramp up</button>
               <button type="button" role="radio" data-pattern="wave" aria-checked="false">Up and down</button>
@@ -86,27 +144,27 @@
             </div>
           </div>
           <label class="field">
-            <span class="field-label">Your app at its busiest</span>
+            <span class="field-label">Your app at its busiest {{ help('need_mb', 'Your app at its busiest') }}</span>
             <span class="input-unit"><input type="number" name="need_mb" value="1600" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">Each size is judged against this</span>
           </label>
           <label class="field">
-            <span class="field-label">From</span>
+            <span class="field-label">From {{ help('low_mb', 'From') }}</span>
             <span class="input-unit"><input type="number" name="low_mb" value="200" min="0" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">Quiet-time memory, 0 for none</span>
           </label>
           <label class="field">
-            <span class="field-label">To</span>
+            <span class="field-label">To {{ help('high_mb', 'To') }}</span>
             <span class="input-unit"><input type="number" name="high_mb" value="3200" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">Go past your app's busiest to see the room left</span>
           </label>
           <label class="field">
-            <span class="field-label" id="lt-steps-label">Steps</span>
+            <span class="field-label"><span id="lt-steps-label">Steps</span> {{ help('steps', 'Steps') }}</span>
             <span class="input-unit"><input type="number" name="steps" value="6" min="2" max="20" step="1" inputmode="numeric"></span>
             <span class="field-note" id="lt-steps-note">2 to 20</span>
           </label>
           <label class="field">
-            <span class="field-label">Each step lasts</span>
+            <span class="field-label">Each step lasts {{ help('step_sec', 'Each step lasts') }}</span>
             <span class="input-unit"><input type="number" name="step_sec" value="60" min="10" max="1800" step="1" inputmode="numeric"><span>seconds</span></span>
             <span class="field-note">60+ gives the clearest breaking point</span>
           </label>
@@ -114,24 +172,24 @@
 
         <div class="lt-fields">
           <label class="field">
-            <span class="field-label">Parallel workers</span>
+            <span class="field-label">Parallel workers {{ help('workers', 'Parallel workers') }}</span>
             <span class="input-unit"><input type="number" name="workers" value="2" min="1" max="16" step="1" inputmode="numeric"></span>
             <span class="field-note">The memory is split evenly between them</span>
           </label>
           <label class="field">
-            <span class="field-label">Background work</span>
+            <span class="field-label">Background work {{ help('background_cpu', 'Background work') }}</span>
             <span class="input-check"><input type="checkbox" name="background_cpu"><span>Every vCPU busy, low priority</span></span>
             <span class="field-note">Like a server's other jobs. Without it the test is the only work, so a size goes from healthy straight to critical</span>
           </label>
           <label class="field">
-            <span class="field-label">Extra swap</span>
+            <span class="field-label">Extra swap {{ help('swap_mb', 'Extra swap') }}</span>
             <span class="input-unit"><input type="number" name="swap_mb" value="0" min="0" max="4096" step="1" inputmode="numeric"><span>MB</span></span>
             <span class="field-note">Added for the test, removed after. A size that cannot hold the load slows down instead of being killed</span>
           </label>
         </div>
 
         <div class="lt-preview" aria-live="polite">
-          <p class="lt-summary" id="lt-summary"></p>
+          <p class="lt-summary"><span id="lt-summary"></span> {{ help('plan', 'the plan') }}</p>
           <div class="lt-plot" id="lt-plot">
             <svg id="lt-chart" class="lt-chart" xmlns="http://www.w3.org/2000/svg" role="img"
                  aria-label="Planned memory load over time"></svg>
@@ -139,6 +197,7 @@
           <ul class="lt-fit" id="lt-fit"></ul>
           <details class="lt-commands">
             <summary>Commands each instance will run</summary>
+            {{ help('commands', 'the commands') }}
             <pre id="lt-commands"></pre>
           </details>
           <p class="lt-error" id="lt-error" role="alert" hidden></p>
@@ -146,10 +205,10 @@
 
         <div class="lt-fields" id="lt-token-row" hidden>
           <label class="field field-wide">
-            <span class="field-label">Server token</span>
+            <span class="field-label">Server token {{ help('token', 'the server token') }}</span>
             <span class="input-unit"><input type="password" id="lt-token" autocomplete="off" spellcheck="false"></span>
             <span class="field-note">This server only starts and stops tests for someone with its token
-              (<code>SYSHEALTH_TOKEN</code>; after Terraform, <code>terraform output -raw token</code>).
+              (<code>SYSHEALTH_TOKEN</code>; on AWS, <code>./aws.sh open</code> opens this page with it filled in).
               Kept in this browser only.</span>
           </label>
         </div>
@@ -157,30 +216,31 @@
         <div class="lt-actions">
           <button type="submit" class="primary-btn" id="lt-start">Start test</button>
           <button type="button" class="ghost-btn" id="lt-stop" disabled>Stop test</button>
+          {{ help('start', 'Start and Stop') }}
           <p class="lt-status" id="lt-status" role="status"></p>
         </div>
       </form>
 
       <div class="lt-results" id="lt-results" hidden>
-        <h3 class="lt-results-title" id="lt-results-title">Last test</h3>
+        <h3 class="lt-results-title"><span id="lt-results-title">Last test</span> {{ help('results', 'the results') }}</h3>
         <p class="card-subtitle" id="lt-results-summary"></p>
 
         <!-- The question the test was run to answer. Worked out on the server
              (rightsize.py), so GET /report gives the same answer. -->
         <section class="rs" id="rs" aria-labelledby="rs-heading">
           <div class="rs-head">
-            <h4 class="rs-title" id="rs-heading">Which size to choose</h4>
+            <h4 class="rs-title"><span id="rs-heading">Which size to choose</span> {{ help('which-size', 'the verdict') }}</h4>
             <div class="rs-inputs">
               <label class="field">
-                <span class="field-label">Your app at its busiest</span>
+                <span class="field-label">Your app at its busiest {{ help('rs-need', 'Your app at its busiest') }}</span>
                 <span class="input-unit"><input type="number" id="rs-need" min="1" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
               </label>
               <label class="field">
-                <span class="field-label">Keep spare</span>
+                <span class="field-label">Keep spare {{ help('rs-margin', 'Keep spare') }}</span>
                 <span class="input-unit"><input type="number" id="rs-margin" value="25" min="0" max="200" step="1" inputmode="numeric"><span>%</span></span>
               </label>
               <label class="field" title="Optional. Half of one vCPU busy around the clock is 0.5. Prices in the CPU credits a burstable size would burn.">
-                <span class="field-label">Its average CPU</span>
+                <span class="field-label">Its average CPU {{ help('rs-cpu', 'Its average CPU') }}</span>
                 <span class="input-unit"><input type="number" id="rs-cpu" min="0" max="192" step="0.05" inputmode="decimal" placeholder="optional"><span>vCPU</span></span>
               </label>
             </div>
@@ -193,7 +253,7 @@
 
         <figure class="rs-curve" id="rs-curve-wrap" hidden>
           <figcaption class="rs-curve-head">
-            <span class="rs-curve-title">Pressure at each load level</span>
+            <span class="rs-curve-title">Pressure at each load level {{ help('curve', 'this chart') }}</span>
             <span class="rs-curve-sub">Where each line crosses the degraded line is the most that size can hold.</span>
           </figcaption>
           <ul class="legend rs-legend" id="rs-legend"></ul>
@@ -208,14 +268,14 @@
             <caption class="visually-hidden">How each instance coped with the last load test</caption>
             <thead>
               <tr>
-                <th scope="col">Instance</th>
-                <th scope="col">Outcome</th>
-                <th scope="col" class="num">Holds up to</th>
-                <th scope="col" class="num">Spare</th>
-                <th scope="col" class="num">Per month</th>
-                <th scope="col" class="num">Worst minute</th>
-                <th scope="col" class="num">Worst 10 s</th>
-                <th scope="col" class="num" data-variable>Critical from</th>
+                <th scope="col">Instance {{ help('col-r-instance', 'Instance') }}</th>
+                <th scope="col">Outcome {{ help('col-outcome', 'Outcome') }}</th>
+                <th scope="col" class="num">Holds up to {{ help('col-holds', 'Holds up to') }}</th>
+                <th scope="col" class="num">Spare {{ help('col-spare', 'Spare') }}</th>
+                <th scope="col" class="num">Per month {{ help('col-month', 'Per month') }}</th>
+                <th scope="col" class="num">Worst minute {{ help('col-worst-minute', 'Worst minute') }}</th>
+                <th scope="col" class="num">Worst 10 s {{ help('col-worst-10s', 'Worst 10 s') }}</th>
+                <th scope="col" class="num" data-variable>Critical from {{ help('col-critical-from', 'Critical from') }}</th>
               </tr>
             </thead>
             <tbody id="lt-results-body"></tbody>
@@ -240,7 +300,7 @@
 
     <!-- Current state. Not scoped by the range filter: this is always "now". -->
     <section class="overview" aria-labelledby="overview-heading">
-      <h1 class="section-heading" id="overview-heading">Current state</h1>
+      <h1 class="section-heading"><span id="overview-heading">Current state</span> {{ help('current-state', 'the Current state cards') }}</h1>
 
       <div class="overview-grid" id="overview-single">
         <div class="hero">
@@ -249,12 +309,15 @@
             <span class="presence" id="hero-presence" data-online="false" hidden></span>
           </p>
           <p class="hero-figure"><span id="hero-psi">&mdash;</span><span class="hero-pct">%</span></p>
-          <p class="hero-unit">of the last minute, programs were waiting for memory</p>
+          <p class="hero-unit">of the last minute, programs were waiting for memory {{ help('psi-minute', 'this number') }}</p>
           <div class="band-scale" id="hero-scale"></div>
-          <p class="status-badge" id="status-badge" data-state="unknown">
-            <span class="status-icon" id="status-icon" aria-hidden="true"></span>
-            <span class="status-text" id="status-text">No data</span>
-          </p>
+          <div class="status-row">
+            <p class="status-badge" id="status-badge" data-state="unknown">
+              <span class="status-icon" id="status-icon" aria-hidden="true"></span>
+              <span class="status-text" id="status-text">No data</span>
+            </p>
+            {{ help('state', 'the states') }}
+          </div>
           <p class="hero-meaning" id="hero-meaning">Waiting for the SysHealth agent to push its first sample.</p>
           <p class="hero-action" id="hero-action"></p>
           <p class="hero-reason" id="hero-reason"></p>
@@ -262,32 +325,32 @@
 
         <div class="tiles" role="group" aria-label="Latest sample">
           <div class="tile">
-            <p class="tile-label">Right now</p>
+            <p class="tile-label">Right now {{ help('tile-now', 'Right now') }}</p>
             <p class="tile-value" id="tile-now">&mdash;</p>
             <p class="tile-note">Waiting for memory, last 10&nbsp;s. Reacts fastest; the state uses the minute.</p>
           </div>
           <div class="tile">
-            <p class="tile-label">Whole machine stalled</p>
+            <p class="tile-label">Whole machine stalled {{ help('tile-full', 'Whole machine stalled') }}</p>
             <p class="tile-value" id="tile-full">&mdash;</p>
             <p class="tile-note" id="tile-full-note">Every program waiting at once, so no work at all got done.</p>
           </div>
           <div class="tile">
-            <p class="tile-label">Machine load</p>
+            <p class="tile-label">Machine load {{ help('tile-load', 'Machine load') }}</p>
             <p class="tile-value" id="tile-load">&mdash;</p>
             <p class="tile-note" id="tile-load-note">How busy the machine is.</p>
           </div>
           <div class="tile">
-            <p class="tile-label">Load test</p>
+            <p class="tile-label">Load test {{ help('tile-test', 'Load test') }}</p>
             <p class="tile-value" id="tile-test">&mdash;</p>
             <p class="tile-note" id="tile-test-note">No test running</p>
           </div>
           <div class="tile" id="tile-app-box" hidden>
-            <p class="tile-label">Your app &middot; <span id="tile-app-name"></span></p>
+            <p class="tile-label">Your app &middot; <span id="tile-app-name"></span> {{ help('tile-app', 'Your app') }}</p>
             <p class="tile-value" id="tile-app">&mdash;</p>
             <p class="tile-note" id="tile-app-note"></p>
           </div>
           <div class="tile">
-            <p class="tile-label">Memory scanned</p>
+            <p class="tile-label">Memory scanned {{ help('tile-scan', 'Memory scanned') }}</p>
             <p class="tile-value" id="tile-scan">&mdash;</p>
             <p class="tile-note">Pages the kernel searched to free memory, last 5&nbsp;s. A clue to why, not a measure of harm.</p>
           </div>
@@ -299,14 +362,14 @@
       <section class="card why" id="why" aria-labelledby="why-heading" hidden>
         <div class="why-grid">
           <div class="why-memory">
-            <h2 class="why-title" id="why-heading">Where the memory is</h2>
+            <h2 class="why-title"><span id="why-heading">Where the memory is</span> {{ help('mem-where', 'Where the memory is') }}</h2>
             <div class="mem-bar" id="mem-bar" role="img"></div>
             <ul class="mem-legend" id="mem-legend"></ul>
             <p class="why-usage" id="why-usage"></p>
             <p class="why-usage" id="why-other" hidden></p>
           </div>
           <div class="why-top">
-            <h3 class="why-title">Holding the most</h3>
+            <h3 class="why-title">Holding the most {{ help('top-procs', 'Holding the most') }}</h3>
             <ol class="top-list" id="top-list"></ol>
           </div>
         </div>
@@ -354,12 +417,14 @@
           <button type="button" role="radio" data-minutes="60" aria-checked="false">1h</button>
           <button type="button" role="radio" data-minutes="0" aria-checked="false">All</button>
         </div>
+        {{ help('range', 'Range') }}
       </div>
 
       <div class="filter-group" id="instance-filter" role="group" aria-label="Instance" hidden>
         <span class="filter-label" id="instance-label">Instance</span>
         <div class="segmented segmented-keyed" id="instance-control"
              role="radiogroup" aria-labelledby="instance-label"></div>
+        {{ help('instance', 'Instance') }}
       </div>
 
       <div class="filter-group filter-group-end" role="group" aria-label="View">
@@ -367,6 +432,7 @@
           <button type="button" role="radio" data-view="chart" aria-checked="true" class="is-selected">Chart</button>
           <button type="button" role="radio" data-view="table" aria-checked="false">Table</button>
         </div>
+        {{ help('view', 'Chart or Table') }}
       </div>
     </div>
 
@@ -374,7 +440,7 @@
       <figure class="card chart-card" id="chart-card">
         <figcaption class="card-head">
           <div>
-            <h2 class="card-title" id="card-title">Memory pressure over time</h2>
+            <h2 class="card-title"><span id="card-title">Memory pressure over time</span> {{ help('chart', 'the chart') }}</h2>
             <p class="card-subtitle" id="chart-subtitle">Share of time programs waited for memory.</p>
           </div>
           <ul class="legend" id="legend"></ul>
@@ -405,16 +471,16 @@
             <caption class="visually-hidden">Memory pressure samples in the selected range</caption>
             <thead>
               <tr>
-                <th scope="col">Time</th>
-                <th scope="col" id="table-instance-head" hidden>Instance</th>
-                <th scope="col" class="num">Now (10&nbsp;s)</th>
-                <th scope="col" class="num">Last minute</th>
-                <th scope="col" class="num">Whole machine</th>
-                <th scope="col" class="num">In use</th>
-                <th scope="col">State</th>
-                <th scope="col" class="num">Test load</th>
-                <th scope="col" class="num">Scanned &Delta;</th>
-                <th scope="col">Reason</th>
+                <th scope="col">Time {{ help('col-time', 'Time') }}</th>
+                <th scope="col" id="table-instance-head" hidden>Instance {{ help('col-instance', 'Instance') }}</th>
+                <th scope="col" class="num">Now (10&nbsp;s) {{ help('col-now', 'Now') }}</th>
+                <th scope="col" class="num">Last minute {{ help('col-minute', 'Last minute') }}</th>
+                <th scope="col" class="num">Whole machine {{ help('col-full', 'Whole machine') }}</th>
+                <th scope="col" class="num">In use {{ help('col-in-use', 'In use') }}</th>
+                <th scope="col">State {{ help('col-state', 'State') }}</th>
+                <th scope="col" class="num">Test load {{ help('col-test-load', 'Test load') }}</th>
+                <th scope="col" class="num">Scanned &Delta; {{ help('col-scanned', 'Scanned') }}</th>
+                <th scope="col">Reason {{ help('col-reason', 'Reason') }}</th>
               </tr>
             </thead>
             <tbody id="table-body"></tbody>
@@ -424,6 +490,7 @@
     </section>
   </main>
 
+  <script src="{{ url_for('static', filename='js/help.js') }}"></script>
   <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
 </body>
 </html>
