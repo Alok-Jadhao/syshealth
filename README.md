@@ -2,12 +2,23 @@
 
 [![test](https://github.com/Alok-Jadhao/syshealth/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/Alok-Jadhao/syshealth/actions/workflows/test.yml)
 
+**In plain words.** To run an app on a cloud server you pick a size, and the
+size decides how much memory you rent. Too small, and the app slows down or is
+killed when memory runs out. Too big, and you pay every month for memory it
+never uses. The usual guide, "how full is the memory?", misleads: in the run
+below, one server was 95% full and fast, and another, 97% full, lost an eighth
+of its time waiting.
+
 SysHealth tells you **which instance size to buy for your app, and shows the
-evidence**. It runs the memory your app needs on several sizes at once, measures
-how long programs wait for memory on each (Linux PSI, Pressure Stall
-Information), and names the cheapest size that holds your app's peak with room
-to spare, in dollars a month. A Flask server collects the agents' samples and
-serves a live dashboard; the answer is also one API call away.
+evidence**. It puts your app's memory load on several sizes at the same moment,
+measures how long programs on each had to **wait for memory**, and names the
+cheapest size that holds your app's peak with room to spare, in dollars a
+month. A live dashboard shows it happening and explains every number on it.
+
+Under the hood, an agent on each machine reads Linux PSI (Pressure Stall
+Information), the kernel's own count of time lost waiting for memory. A Flask
+server collects the samples, runs the tests and serves the dashboard, and the
+answer is also one API call away.
 
 ![The same memory load on four EC2 sizes at once, AWS ap-south-1, 19 October 2026: for each size and load level, the time stalled waiting for memory and the memory in use. For a 1.6 GB app with 25% spare: t3.medium, $32.70 a month.](docs/img/real-run-2026-10-19.svg)
 
@@ -18,6 +29,19 @@ t3.medium held 3.2 GB at 95% in use and was stalled 0.03% of the time. For a
 1.6 GB app with 25% spare, that is **t3.medium at $32.70 a month**. Memory in use
 is not memory pressure: 97% and 95% in use look alike, and only one of them was
 slow.
+
+### Start here
+
+| You want to... | Read | You need |
+|---|---|---|
+| See what it does, in two minutes, on your laptop | [Preview it locally](#preview-it-locally) | Python 3 and Flask. No AWS |
+| Know what the dashboard shows | [Dashboard](#dashboard), or press **Guide** and any **?** on the page | Nothing |
+| Find the right size on real AWS machines | [Setup from zero](#setup-from-zero), then [Run it on AWS](#run-it-on-aws-one-command-up-one-down) | An AWS account; about $0.19 an hour while the fleet is up |
+| Use machines you set up yourself | [Quick Start (manual)](#quick-start-manual) | Linux machines you can reach over SSH |
+| Look up a command or a setting | [docs/commands.md](docs/commands.md), [Settings](#settings) | Nothing |
+| Understand the numbers | [How it works](#how-it-works), [Health Classification](#health-classification), [Glossary](#glossary) | Nothing |
+| Check sizes in CI, or ask an AI agent | [From the command line, or CI](#from-the-command-line-or-ci), [MCP](#ask-an-ai-agent-mcp) | A running SysHealth server |
+| Fix something that went wrong | [Troubleshooting](#troubleshooting) | Nothing |
 
 ### Try it
 
@@ -111,21 +135,40 @@ put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
 
 ---
 
-## Architecture
+## How it works
 
 ```
-EC2 Agent (t3.micro)  ──┐
-EC2 Agent (t3.small)  ──┤──► Central Server (Flask :5000)  ◄──  Browser Dashboard
-EC2 Agent (t3.medium) ──┤         ▲
-EC2 Agent (t3.large)  ──┘         │ Stress trigger (:5001)
-                                   └──────────────────────
+             Your laptop: browser · ./aws.sh · cli.py · AI agent (MCP)
+                              │  reads results; starts tests with the token
+                              ▼
+               ┌──────────────────────────────┐
+               │  Server and dashboard  :5000 │  server.py: keeps an hour of samples,
+               └──────────────────────────────┘  plans tests, works out the verdict
+                 ▲ a sample every 5 s    │ "run this load" (port 5001, token)
+                 │                       ▼
+     ┌───────────┬───────────┬───────────┬───────────┐
+     │ t3.micro  │ t3.small  │ t3.medium │ t3.large  │  syshealth.py, the agent, on each:
+     │   agent   │   agent   │   agent   │   agent   │  measures, and runs the load when told
+     └───────────┴───────────┴───────────┴───────────┘
 ```
 
-Each agent:
-- Reads `/proc/pressure/memory` (PSI `some` and `full`, avg10) and `/proc/vmstat` every 5 seconds
-- Classifies health as **HEALTHY / DEGRADED / CRITICAL** against fixed, research-backed thresholds ([below](#health-classification))
-- POSTs a JSON payload to the central server
-- Runs a control server on port 5001 that runs the load tests the dashboard plans, and stops them
+1. **The agents measure.** On each machine, every 5 seconds, the agent reads
+   how much of the time programs were stuck waiting for memory: Linux PSI, in
+   `/proc/pressure/memory`, both `some` and `full`. It also reads where the
+   memory is (`/proc/meminfo`, `/proc/vmstat`, the biggest processes) and sends
+   it all to the server.
+2. **Each machine gets a state:** HEALTHY, DEGRADED or CRITICAL, from fixed
+   thresholds taken from systems that use PSI in production
+   ([below](#health-classification)).
+3. **A load test puts the same load on every size.** You describe your app's
+   memory: its busiest, or how it rises and falls. The server sends the same
+   plan to every agent, which runs it with `stress` at the same moment, on its
+   control port, 5001.
+4. **The verdict.** For each size, how much memory it held before programs
+   started waiting. The cheapest size that holds your app plus 25% spare is the
+   answer, priced per month ([below](#right-sizing-which-size-to-buy)).
+5. **The same answer everywhere:** the dashboard, `cli.py`, `GET /report`,
+   Prometheus's `GET /metrics` and the MCP server for AI agents.
 
 ---
 
@@ -169,6 +212,88 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
   app's peak with the room to spare you ask for, priced per month, with a chart
   of pressure against load that shows where each size gives out
   ([below](#right-sizing-which-size-to-buy))
+
+---
+
+## Setup from zero
+
+What to install depends on how far you go: steps 1 and 2 for the demo and the
+tests, step 3 as well for AWS. Linux, tested on Ubuntu.
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/Alok-Jadhao/syshealth.git
+cd syshealth
+```
+
+### 2. Python and its packages
+
+Python 3.10 or newer, with Flask, requests and waitress:
+
+```bash
+sudo apt install python3-flask python3-requests python3-waitress
+```
+
+Or in a virtualenv, which works on any system and avoids Debian's
+`externally-managed-environment` error from pip:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+source .venv/bin/activate
+```
+
+That is all `npm run dev` and `npm test` need. `cli.py` and `mcp_server.py`
+need only Python itself.
+
+### 3. For AWS: the AWS CLI, Terraform and an access key
+
+Only for `./aws.sh` and `terraform/rightsize.sh`.
+
+1. **The AWS CLI** ([AWS's install guide](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html)):
+
+   ```bash
+   curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o awscliv2.zip
+   unzip awscliv2.zip && sudo ./aws/install
+   aws --version
+   ```
+
+2. **Terraform 1.3 or newer** ([HashiCorp's install guide](https://developer.hashicorp.com/terraform/install)),
+   for example from HashiCorp's apt repository:
+
+   ```bash
+   wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+   sudo apt update && sudo apt install terraform
+   terraform version
+   ```
+
+   On a Mac, Homebrew has both: `brew install awscli` and
+   `brew install hashicorp/tap/terraform`.
+
+3. **An access key.** In the AWS console: **IAM → Users → Create user**, attach
+   the `AmazonEC2FullAccess` policy; then on that user, **Security credentials →
+   Create access key → Command Line Interface (CLI)**. Keep the key ID and the
+   secret somewhere safe, and never put them in the repository.
+
+4. **A profile** that holds the key. The name is yours to choose; `hackathon`
+   here:
+
+   ```bash
+   aws configure --profile hackathon      # the key ID, the secret, region ap-south-1, output json
+   aws sts get-caller-identity --profile hackathon      # prints your account number: it works
+   ```
+
+Nothing else to prepare: `./aws.sh up --profile hackathon` makes its own SSH key
+and firewall ([below](#run-it-on-aws-one-command-up-one-down)). It also uses
+`curl`, `ssh` and `ssh-keygen`, which Ubuntu has already.
+
+**What it costs.** The default fleet, a t3.small dashboard and a t3.micro,
+small, medium and large, is about $0.19 an hour in Mumbai ($0.22 with disks and
+addresses), and nothing once `./aws.sh down` has run. One test with
+`terraform/rightsize.sh`, which builds, tests and destroys, costs a few cents.
+`./aws.sh status` shows what is running and what it has cost so far.
 
 ---
 
@@ -220,7 +345,7 @@ and Terraform. Then:
 
 `up` first says which account and region it will use and what that costs
 (about $0.19 an hour in Mumbai, the default region), and asks before going on.
-It builds the fleet, waits until every size is reporting (seven or eight
+It builds the fleet, waits until every size is reporting (four to eight
 minutes), prints the dashboard's address and token, and opens the dashboard in
 your browser already signed in: the token rides after the `#` in the link,
 which the browser never sends to the server, so **Start** works without pasting
@@ -266,6 +391,12 @@ costs and design notes.
 ---
 
 ## Quick Start (manual)
+
+Without `aws.sh`: one server and an agent on each machine you want to compare,
+set up by hand. Any Linux machine with kernel 4.20 or newer works; the steps
+below use EC2. The firewall rule here lets everyone in; for anything that stays
+up, put your own address (`curl -4 -s checkip.amazonaws.com`, then `/32`) in
+place of `0.0.0.0/0` for ports 22 and 5000, and let only the server reach 5001.
 
 ### 1. Launch EC2 instances (AWS CLI)
 
@@ -346,6 +477,54 @@ them, with the token, and with the agents pointed at `http://$SERVER:5000/metric
 
 ---
 
+## Every command
+
+**[docs/commands.md](docs/commands.md)** has each one in full: what it needs,
+every option, and what it does step by step.
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | The dashboard with a simulated fleet, on your laptop (`python3 dev.py` without Node) |
+| `npm test` | The unit tests, as CI runs them |
+| `./aws.sh up --profile NAME` | Build the fleet on AWS and open the dashboard, signed in |
+| `./aws.sh down` | Destroy all of it |
+| `./aws.sh open` | Open the dashboard again, signed in |
+| `./aws.sh status` | What is running, and what it has cost |
+| `./aws.sh test --need MB --ramp LOW:HIGH ...` | Run a load test and print which size to buy |
+| `./aws.sh ssh SIZE` | A shell on one machine (`dashboard`, `t3.micro`, ...) |
+| `./aws.sh deploy` | Send your local changes to the fleet |
+| `./aws.sh shortcuts --profile NAME` | Two desktop icons: SysHealth demo on, SysHealth demo off |
+| `terraform/rightsize.sh ...` | Build a fleet, test, report and destroy, in one command |
+| `python3 cli.py status`, `run`, `report`, `wait` | Drive any SysHealth server from a terminal or CI |
+| `python3 server.py` | The server and dashboard, on a machine of your own |
+| `python3 syshealth.py`, `calibrate` | The agent, on each machine you compare |
+| `./deploy.sh` | Send your changes to machines you set up by hand |
+| `python3 mcp_server.py` | SysHealth as tools for an AI agent |
+| `python3 tools/update_prices.py` | Refresh the price list from AWS |
+
+---
+
+## Settings
+
+Every setting is an environment variable. Only the agent's server address is
+required.
+
+| Variable | Read by | Meaning | Default |
+|---|---|---|---|
+| `SYSHEALTH_SERVER_URL` | agent | Where to send samples: `http://SERVER_IP:5000/metrics` | none; required |
+| `SYSHEALTH_TOKEN` | server, agent, `cli.py`, MCP server, `deploy.sh` | The shared secret. Agents send it with every sample, and starting or stopping a test needs it ([below](#who-can-start-a-test)) | none: nothing is checked |
+| `SYSHEALTH_APP` | agent | Also watch your app's own cgroup: a systemd unit (`myapp.service`) or a cgroup path ([below](#measure-your-app-not-the-whole-machine)) | off |
+| `SYSHEALTH_CONTROL` | agent | `off`: report as usual, but never take a load test. For production machines | on |
+| `SYSHEALTH_INSTANCE_TYPE`, `SYSHEALTH_INSTANCE_REGION`, `SYSHEALTH_INSTANCE_ID`, `SYSHEALTH_INSTANCE_NAME` | agent | The machine's size, region, id and name, for machines off EC2 | read from EC2, else the hostname |
+| `SYSHEALTH_URL` | `cli.py`, MCP server | The server to talk to | `http://127.0.0.1:5000` |
+| `SYSHEALTH_PRICES_FILE` | server | A JSON file of your own prices in dollars an hour (`{"t3.micro": 0.0104}`, or by region). It always wins | `data/prices.json` |
+| `SYSHEALTH_PRICE_REGION` | server | The region to price in when an agent does not say | `us-east-1` |
+| `SYSHEALTH_SSH_KEY` | `aws.sh`, `terraform/rightsize.sh` | The fleet's SSH key | `~/.ssh/syshealth_ed25519` |
+| `AWS_PROFILE` | `aws.sh`, `terraform/rightsize.sh`, Terraform | The AWS CLI profile; `./aws.sh up --profile` sets it | your default keys |
+| `SERVER`, `AGENTS`, `KEY` | `deploy.sh` | The machines you set up by hand, and their SSH key | `KEY`: `syshealth-key.pem` |
+
+---
+
 ## Health Classification
 
 The number is Linux PSI: the share of time programs were stalled waiting for
@@ -372,6 +551,30 @@ the ones it was judged by, so the dashboard draws whatever was applied.
 
 **Baseline calibration** still runs (`python3 syshealth.py calibrate`) and is
 reported as each machine's idle reference, but states no longer depend on it.
+
+---
+
+## Glossary
+
+| Word | Meaning |
+|---|---|
+| **PSI** (Pressure Stall Information) | Linux's own measure of time lost waiting for memory, CPU or disk, in `/proc/pressure/`. Since kernel 4.20 |
+| **some** | The share of time at least one program was waiting for memory |
+| **full** | The share of time every program was waiting at once: the machine got nothing done |
+| **Waiting for memory, last minute** | The big number on each card: the average of the last minute's 10-second readings of `some`. States are judged on it |
+| **HEALTHY, DEGRADED, CRITICAL** | Under 10%; 10 to 40%; 40% or more, or `full` at 10% or more. A size turns DEGRADED or CRITICAL after 3 readings in a row (15 s), and HEALTHY again at once |
+| **RAN OUT OF MEMORY** | During a test, the kernel killed the load because it did not fit |
+| **Memory in use** | What `free` and most dashboards show. It counts the file cache Linux gives back on demand, so it says how full, not how slow |
+| **Agent** | `syshealth.py`, on each machine being compared |
+| **Server, dashboard** | `server.py`: collects the samples, serves the page and the API |
+| **Fleet** | The dashboard machine and one machine per size, as `./aws.sh up` builds them |
+| **Load test** | The same memory load on every machine at the same moment, made with `stress`: a peak held, or a ramp, wave or bursts in steps |
+| **Workers** | The `stress` processes the load is split between |
+| **Need** | Your app's memory at its busiest. Each size is judged against it |
+| **Margin, spare** | Room to keep above the need: 25% unless you change it |
+| **Capacity, "holds up to"** | The most memory a size held while still HEALTHY |
+| **Token** | The shared secret that lets you start and stop tests. Each fleet gets a new one |
+| **Baseline** | A machine's idle reading, measured by `calibrate`. For reference only |
 
 ---
 
@@ -767,6 +970,26 @@ Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and
 
 ---
 
+## Troubleshooting
+
+| What you see | Why | What to do |
+|---|---|---|
+| `pip install` says `externally-managed-environment` | Debian and Ubuntu keep pip out of the system Python | `sudo apt install python3-flask python3-requests`, or a virtualenv ([Setup](#2-python-and-its-packages)) |
+| `npm run dev` stops at once: the address is in use | Something else has port 5000 | Stop it, or the earlier `npm run dev` |
+| `./aws.sh up`: "the AWS credentials ... do not work" | No keys for that profile, or wrong ones | `aws configure --profile NAME`, then `aws sts get-caller-identity --profile NAME` |
+| `terraform` or `aws`: command not found | Not installed | [Setup, step 3](#3-for-aws-the-aws-cli-terraform-and-an-access-key) |
+| The dashboard stopped loading | Your network changed, and the firewall lets in only the old address | `./aws.sh up` again: it moves the firewall and keeps the machines |
+| "Not every size is reporting yet" at the end of `up` | One machine is still installing, or its setup failed | Wait a minute, then `./aws.sh status`. Still missing: `./aws.sh ssh <size> sudo tail -30 /var/log/syshealth-bootstrap.log` |
+| **Start** asks for the token, or says it is wrong | The page has none, or one from an earlier fleet: each fleet gets a new token | `./aws.sh open` |
+| `InsufficientInstanceCapacity` while building | AWS has no room for that size there right now | `./aws.sh down`, then `./aws.sh up --region eu-west-1` (or another region) |
+| Every card reads 0% | Nothing is waiting for memory: an idle machine is healthy | Run a load test |
+| A card says **RAN OUT OF MEMORY** | The load did not fit, and the kernel killed it | Not a fault: that size is too small for that load |
+| A fleet you forgot about | It bills until destroyed | `./aws.sh status` shows it and its cost; `./aws.sh down` destroys it |
+
+More, for fleets built with plain Terraform: [terraform/README.md](terraform/README.md#troubleshooting).
+
+---
+
 ## Project Structure
 
 ```
@@ -801,12 +1024,19 @@ syshealth/
 ├── tests/             # python3 -m unittest discover -s tests  (or npm test); CI runs them
 ├── requirements.txt   # flask, requests, waitress
 ├── docs/
+│   ├── commands.md    # Every command: what it needs, every option, what it does
 │   ├── thresholds.md  # What the number means; the research behind each threshold
 │   ├── img/real-run-2026-10-19.svg  # The picture at the top, from the real run's report
-│   └── make_result_figure.py        # Draws it: python3 docs/make_result_figure.py REPORT.json
+│   ├── make_result_figure.py        # Draws it: python3 docs/make_result_figure.py REPORT.json
+│   ├── syshealth-demo-runbook.pdf   # The live demo, step by step, on four pages
+│   └── make_runbook.py              # Rebuilds that PDF (needs reportlab)
 └── terraform/         # Dashboard + one instance per size, in one apply
+    ├── README.md      # The plain-Terraform route, costs, design notes, troubleshooting
+    ├── main.tf, variables.tf, outputs.tf, *.tftpl   # The fleet, and how each machine sets itself up
     ├── check.sh       # Which sizes are reporting, and why one is not
     ├── common.sh      # Shared by aws.sh, rightsize.sh and deploy.sh
+    ├── relaunch.sh    # Bring a hand-built fleet back up, checking what has broken it before
+    ├── recalibrate.sh # Measure every agent's idle baseline again
     └── rightsize.sh   # Build, test, report and destroy, in one command
 ```
 
@@ -822,7 +1052,8 @@ syshealth/
 - Linux kernel ≥ 4.20 (PSI support)
 - `stress` package on agent instances (`sudo apt install stress`)
 - Node ≥ 18 only if you want `npm run dev` — `python3 dev.py` is the same thing
-- Terraform ≥ 1.3 only if you use `terraform/`
+- For AWS only: the AWS CLI with credentials, Terraform ≥ 1.3, curl and ssh
+  ([Setup from zero](#setup-from-zero))
 
 ---
 
