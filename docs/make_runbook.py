@@ -141,9 +141,17 @@ A(para("Four EC2 sizes, one load, one verdict in dollars. "
 # ---- 1
 A(para("1 &nbsp; The day before", H1))
 E(bullets([
-    "<b>Rehearse on the network you will present from.</b> The dashboard only lets in the "
-    "address <font face='Courier'>./aws.sh up</font> ran from, on port 5000, and many campus "
-    "networks block port 5000. Keep a phone hotspot as the way out.",
+    "<b>The address, once:</b> <font face='Courier'>https://syshealth.aryangorde.com</font> "
+    "on every <font face='Courier'>up</font>, on any network and the audience's phones. "
+    "$3.65 a month. It prints two records to add at Hostinger (an A record "
+    "<font face='Courier'>syshealth</font> and a CNAME) and waits for the certificate; "
+    "Ctrl-C is safe, run it again to carry on:",
+]))
+E(code("./aws.sh domain syshealth.aryangorde.com --profile hackathon"))
+E(bullets([
+    "<b>Rehearse on the network you will present from.</b> The address is HTTPS, which any "
+    "network lets through; without it, port 5000, which many campus networks block. Keep a "
+    "phone hotspot as the way out.",
     "<b>Have the fallbacks ready:</b> the threshold screenshots, the 22 October step "
     "screenshots (<font face='Courier'>~/syshealth-aws-run-2026-10-22/</font>), the real "
     "four-state picture, from the button (<font face='Courier'>~/syshealth-aws-three-states-button.png</font>, "
@@ -161,11 +169,21 @@ A(para("The fleet needs about five minutes to boot and calibrate, and you want o
 A(para("Bring the fleet up", H2))
 A(para("Double-click <b>SysHealth demo on</b> on the desktop, or:", BODY))
 E(code("./aws.sh up --profile hackathon"))
-A(para("It names the account and region and what it costs: about $0.19 an hour for the five "
-       "machines, $0.22 with their addresses and disks. The command asks first; the icon does "
-       "not.", SMALL))
-A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then the dashboard opens in "
-         "the browser, signed in."))
+A(para("It names the account, region and cost: about $0.25 an hour with the addresses, disks "
+       "and load balancer. The command asks first; the icon does not.", SMALL))
+A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then "
+         "<font face='Courier'>https://syshealth.aryangorde.com</font> opens in the browser, "
+         "signed in."))
+A(para("Get the codes from the terminal", H2))
+A(para("The page shows nothing without a code; both are new on every "
+       "<font face='Courier'>up</font>.", BODY))
+E(code("./aws.sh token          # --raw: the token alone, for a script"))
+A(expect("<font face='Courier'>Server token</font>: yours, already in the browser; it alone "
+         "starts and stops tests. <font face='Courier'>Watch-only code</font>: for the room, "
+         "on the slide under the address; it shows everything and starts nothing."))
+A(para("Without aws.sh: <font face='Courier'>cd terraform &amp;&amp; TF_WORKSPACE=fleet "
+       "terraform output -raw token</font> (or <font face='Courier'>view_token</font>).",
+       SMALL))
 E(code("./aws.sh status"))
 A(expect("four sizes, <font face='Courier'>ONLINE yes</font>, all HEALTHY."))
 A(para("Rehearse once, from the dashboard", H2))
@@ -173,16 +191,20 @@ A(para("Press <b>Load test</b>, choose <b>Variable load</b> and <b>Ramp up</b>. 
        "are the test: your app at its busiest 1600 MB, from 200 to 3200 MB, 6 steps of 60 "
        "seconds. Press <b>Start on 4 instances</b>. Every <b>?</b> on the page explains its part, "
        "and <b>Guide</b>, top right, the whole page.", BODY))
-A(para("About seven minutes. It proves the whole chain works and leaves a finished result on "
-       "the page in case the live run goes wrong. If step 5b is in the plan, run it once too "
-       "(six minutes). Then wait two minutes for the lines to fall back to zero. Closed the tab, or Start says the token is wrong? This opens it again, signed in:",
-       SMALL))
-E(code("./aws.sh open"))
+A(para("About seven minutes: it proves the chain works and leaves a result on the page in "
+       "case the live run fails. Step 5b planned? Run it too (six minutes). Then wait two "
+       "minutes for the lines to fall to zero. Closed the tab, or the page asks for a code? "
+       "<font face='Courier'>./aws.sh open</font> opens it again, signed in.", SMALL))
 
 A(PageBreak())
 
 # ---- 3
 A(para("3 &nbsp; The demo, about twelve minutes", H1))
+
+A(para("Step 0 — Let the room follow along (optional)", H2))
+A(para("Show the slide: the address and the watch-only code.", BODY))
+E(say("Open syshealth.aryangorde.com on your phone and type the code on the slide. You "
+      "see what I see, live. Only I can start a test."))
 
 A(para("Step 1 — The problem (one minute, no clicking)", H2))
 E(say("Teams pick an instance size by guessing, or by an alarm at 80 percent of memory in "
@@ -250,6 +272,7 @@ E(say("A real server has other work that keeps running, so the small is slowed b
 A(para("Step 6 — Beyond the dashboard (optional, one minute)", H2))
 A(para("The same verdict from the terminal, instantly, from the test that just ran:", BODY))
 E(code("URL=http://<dashboard-ip>:5000      # ./aws.sh status prints it\n"
+       "export SYSHEALTH_TOKEN=$(./aws.sh token --raw)\n"
        "python3 cli.py --server $URL report"))
 E(say("The same test runs from the command line, so it can gate a build: it fails when the "
       "size the app needs has changed. Prometheus can scrape everything at /metrics, and an "
@@ -295,8 +318,9 @@ E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes
       "asked for, the small's 5 percent rules it out."))
 
 A(para("“Could this run in production?”", H2))
-E(say("The measurement side, yes: Prometheus can scrape it today, and tests need a shared "
-      "token. History is kept in memory, so a real deployment would need a database first."))
+E(say("The measurement side, yes: Prometheus can scrape it today, seeing it needs a code, "
+      "and tests need the token. History is kept in memory, so a real deployment would need "
+      "a database first."))
 
 A(para("“What is it built on?”", H2))
 E(say("Python and Flask. The agent reads the kernel's pressure files every five seconds; "
@@ -305,9 +329,22 @@ E(say("Python and Flask. The agent reads the kernel's pressure files every five 
 # ---- 5
 A(para("5 &nbsp; If something breaks", H1))
 
+A(para("The page asks for a code", H2))
+A(para("The browser has none, or one from an earlier fleet. <font face='Courier'>./aws.sh "
+       "open</font> opens it signed in; <font face='Courier'>./aws.sh token</font> prints "
+       "both codes again.", BODY))
+
+A(para("The address does not open", H2))
+A(para("Just after <font face='Courier'>up</font>, the load balancer takes a minute or "
+       "two; <font face='Courier'>up</font> checks and says so. Type the "
+       "<font face='Courier'>https://</font>: plain http does not answer. Meanwhile the "
+       "second address <font face='Courier'>./aws.sh status</font> prints works from the "
+       "laptop.", BODY))
+
 A(para("The dashboard will not load", H2))
-A(para("Almost always your address changed: a new network, or a mobile provider moving you "
-       "overnight. Or the network blocks port 5000. It looks exactly like a dead server.", BODY))
+A(para("Without the address: almost always your address changed, a new network or a mobile "
+       "provider moving you overnight. Or the network blocks port 5000. It looks exactly like "
+       "a dead server.", BODY))
 E(code("./aws.sh up --profile hackathon      # moves the firewall to this address"))
 A(expect("<font face='Courier'>0 added, 3 changed, 0 destroyed</font>. Still nothing: use the "
          "phone hotspot and run it again."))
@@ -334,11 +371,13 @@ A(para("Say it is simulated (every page says <b>Demo data</b>), then show the RE
 A(para("6 &nbsp; Afterwards", H1))
 A(para("Save the evidence first (history lives in the dashboard's memory; "
        "<font face='Courier'>URL</font> as in step 6), then destroy the fleet:", BODY))
-E(code("""python3 cli.py --server $URL report --save rightsize-$(date +%F).json
-curl -s "$URL/series?limit=720" > demo-evidence-$(date +%F).json
+E(code("""export SYSHEALTH_TOKEN=$(./aws.sh token --raw)
+python3 cli.py --server $URL report --save rightsize-$(date +%F).json
+curl -s -H "Authorization: Bearer $SYSHEALTH_TOKEN" "$URL/series?limit=720" \\
+  > demo-evidence-$(date +%F).json
 ./aws.sh down && ./aws.sh status      # or double-click SysHealth demo off"""))
 A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "
-         "fleet bills about $0.22 an hour, a little over $5 a day."))
+         "fleet bills about $0.25 an hour, about $6 a day."))
 
 # ------------------------------------------------------------------ build ---
 

@@ -40,6 +40,23 @@
   </header>
 
   <main>
+    <!-- A server with a token shows nothing below until it is given a code:
+         its token, or its watch-only code. The page itself holds no data. -->
+    <section class="card gate" id="gate" aria-labelledby="gate-heading" hidden>
+      <h2 class="card-title" id="gate-heading">Enter the access code {{ help('access', 'the access code') }}</h2>
+      <p class="card-subtitle">This dashboard shows its machines only to someone with a code.
+        At a demo, ask the presenter for it.</p>
+      <form class="gate-form" id="gate-form" autocomplete="off">
+        <label class="field">
+          <span class="field-label">Access code</span>
+          <span class="input-unit"><input type="text" id="gate-code" autocomplete="off"
+            autocapitalize="off" autocorrect="off" spellcheck="false"></span>
+        </label>
+        <button type="submit" class="primary-btn">Open</button>
+        <p class="lt-error" id="gate-error" role="alert" hidden></p>
+      </form>
+    </section>
+
     <!-- The page in six lines, for anyone seeing it for the first time. Open
          on a first visit; help.js remembers when it is closed. -->
     <section class="card guide" id="guide" aria-labelledby="guide-heading" hidden>
@@ -208,8 +225,8 @@
             <span class="field-label">Server token {{ help('token', 'the server token') }}</span>
             <span class="input-unit"><input type="password" id="lt-token" autocomplete="off" spellcheck="false"></span>
             <span class="field-note">This server only starts and stops tests for someone with its token
-              (<code>SYSHEALTH_TOKEN</code>; on AWS, <code>./aws.sh open</code> opens this page with it filled in).
-              Kept in this browser only.</span>
+              (<code>SYSHEALTH_TOKEN</code>; on AWS, <code>./aws.sh token</code> prints it, and
+              <code>./aws.sh open</code> opens this page with it filled in). Kept in this browser only.</span>
           </label>
         </div>
 
@@ -219,6 +236,8 @@
           {{ help('start', 'Start and Stop') }}
           <p class="lt-status" id="lt-status" role="status"></p>
         </div>
+        <p class="field-note" id="lt-viewer-note" hidden>You are watching with the watch-only
+          code: you see every test as it runs, and only the server's token starts or stops one.</p>
       </form>
 
       <div class="lt-results" id="lt-results" hidden>

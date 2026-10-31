@@ -1,11 +1,22 @@
 output "dashboard_url" {
-  description = "Open this. Reachable from ssh_cidr only."
+  description = "Open this. With domain_name, https://<it>, for anyone with a code; without, the server's own port, from ssh_cidr only."
+  value       = local.https ? "https://${var.domain_name}" : "http://${aws_instance.server.public_ip}:5000"
+}
+
+output "direct_url" {
+  description = "The server's own port, from ssh_cidr only: the way in that does not depend on DNS or the load balancer."
   value       = "http://${aws_instance.server.public_ip}:5000"
 }
 
 output "token" {
-  description = "What the dashboard asks for before it starts a test, and what cli.py reads from SYSHEALTH_TOKEN."
+  description = "The server's token: the page needs it (or the watch-only code) to show anything, and it alone starts and stops tests. cli.py reads it from SYSHEALTH_TOKEN."
   value       = random_password.token.result
+  sensitive   = true
+}
+
+output "view_token" {
+  description = "The watch-only code: the page shows everything with it and changes nothing. The one to give an audience."
+  value       = random_id.view_token.hex
   sensitive   = true
 }
 
@@ -66,14 +77,17 @@ output "next_steps" {
   value       = <<-EOT
     Everything installs and starts itself. Nothing to run by hand.
 
-    Open:  http://${aws_instance.server.public_ip}:5000
+    Open:  ${local.https ? "https://${var.domain_name}" : "http://${aws_instance.server.public_ip}:5000"}
 
     Allow two to three minutes: package install, ${var.calibrate ? "a 60s idle baseline calibration on each agent, " : ""}then the
     first pushes. The Instance toggle appears once two agents are reporting.
 
+    The page asks for a code before it shows anything. Yours, which also
+    starts and stops tests:      terraform output -raw token
+    The watch-only one, to give an audience:  terraform output -raw view_token
+
     Open "Load test", enter the memory your app needs (peak, or a variable
-    ramp), and watch the smaller sizes separate from the larger ones. The
-    first Start asks for the token:  terraform output -raw token
+    ramp), and watch the smaller sizes separate from the larger ones.
 
     If a size never appears:
       ssh ubuntu@<ip> 'sudo tail -50 /var/log/syshealth-bootstrap.log'
@@ -83,7 +97,7 @@ output "next_steps" {
     is lost if the server restarts. Fine for a few days of spot-checking; not a
     record you can go back through.
 
-    These five instances bill until you stop them:
+    These five instances${local.https ? " and the load balancer" : ""} bill until you stop them:
       terraform destroy
   EOT
 }

@@ -13,15 +13,19 @@ if ! command -v terraform >/dev/null; then
   exit 1
 fi
 
-URL=$(terraform output -raw dashboard_url 2>/dev/null)
+# The server's own port: what ssh_cidr opens, with no DNS or load balancer in
+# the way. A fleet from before direct_url has only dashboard_url, which was it.
+URL=$(terraform output -raw direct_url 2>/dev/null || terraform output -raw dashboard_url 2>/dev/null)
 if [ -z "$URL" ]; then
   echo "No dashboard_url output. Has 'terraform apply' finished in this directory?" >&2
   exit 1
 fi
+# The server shows nothing without its token.
+TOKEN=$(terraform output -raw token 2>/dev/null)
 
 echo "dashboard: $URL"
 
-SERIES=$(curl -fsS --max-time 10 "$URL/series" 2>/dev/null)
+SERIES=$(curl -fsS --max-time 10 -H "Authorization: Bearer $TOKEN" "$URL/series" 2>/dev/null)
 if [ -z "$SERIES" ]; then
   cat >&2 <<EOF
 

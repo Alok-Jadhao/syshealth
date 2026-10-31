@@ -77,7 +77,12 @@
     // push later. These bridge that gap, so the page does not offer Start
     // again just after it was pressed, or show a test it was just told to stop.
     startedAt: null,
-    stopped: null
+    stopped: null,
+    // Until the server accepts a code, the page is only the access form.
+    locked: false,
+    // What this browser's code may do: 'operator', 'viewer', or null before
+    // the server has said.
+    role: null
   };
 
   var REPORT_LAG_MS = 15000;
@@ -1845,6 +1850,10 @@
 
   function renderFeedStatus() {
     var feed = $('#feed-status');
+    if (state.locked) {
+      feed.textContent = 'Needs a code';
+      return;
+    }
     var newest = latestTime();
     if (newest === null) {
       feed.textContent = 'No samples received yet';
@@ -2026,6 +2035,9 @@
   /* ---------- polling ---------- */
 
   function load() {
+    if (state.locked) {
+      return Promise.resolve();
+    }
     var scoped = $('#scoped');
     scoped.classList.add('is-loading');
 
@@ -2033,9 +2045,12 @@
     // already held: an hour of four instances is megabytes, every 5 s.
     var since = state.sinceTs;
     return fetch('series?limit=' + HISTORY_LIMIT + (since !== null ? '&since=' + since : ''), {
-      headers: { Accept: 'application/json' }
+      headers: authHeaders({ Accept: 'application/json' })
     })
       .then(function (response) {
+        if (response.status === 401) {
+          lock();
+        }
         if (!response.ok) {
           throw new Error('HTTP ' + response.status);
         }
@@ -2052,7 +2067,9 @@
         scoped.classList.remove('is-loading');
 
         if (!result.ok) {
-          $('#feed-status').textContent = 'Server unreachable — retrying';
+          if (!state.locked) {
+            $('#feed-status').textContent = 'Server unreachable — retrying';
+          }
           return;
         }
 
@@ -2107,6 +2124,25 @@
   // who has it. The field appears the first time the server asks.
   var TOKEN_KEY = 'syshealth.token';
 
+  // The code every request carries: the server's token, or its watch-only
+  // code. Without one, such a server shows nothing.
+  function authHeaders(headers) {
+    var token = savedToken();
+    if (token) {
+      headers.Authorization = 'Bearer ' + token;
+    }
+    return headers;
+  }
+
+  function keepToken(token) {
+    $('#lt-token').value = token;
+    try {
+      window.localStorage.setItem(TOKEN_KEY, token);
+    } catch (e) {
+      /* Then it lives in the field until the page is closed. */
+    }
+  }
+
   function savedToken() {
     try {
       return window.localStorage.getItem(TOKEN_KEY) || '';
@@ -2149,23 +2185,101 @@
       if (token) {
         input.value = token;
         $('#lt-token-row').hidden = false;
+        checkAccess().then(applyAccess, function () {});
       }
     });
     if (input.value) {
       $('#lt-token-row').hidden = false;
     }
-    input.addEventListener('input', function () {
-      try {
-        window.localStorage.setItem(TOKEN_KEY, input.value.trim());
-      } catch (e) {
-        /* Then it lives in the field until the page is closed. */
+    // Kept only once the server has taken it (postJson): every request sends
+    // the kept one, so half a token typed here would lock the page.
+  }
+
+  /* ---------- access ---------- */
+
+  // What this browser's code may do, from the server. A server older than
+  // the codes has no /access, and needs nothing to watch.
+  function checkAccess() {
+    return fetch('access', { headers: authHeaders({ Accept: 'application/json' }) })
+      .then(function (response) {
+        if (response.status === 401) {
+          return null;
+        }
+        if (!response.ok) {
+          return 'operator';
+        }
+        return response.json().then(function (data) {
+          return data.role || null;
+        });
+      });
+  }
+
+  function applyAccess(role) {
+    if (role) {
+      unlock(role);
+    } else {
+      lock();
+    }
+  }
+
+  function lock(message) {
+    if (!state.locked) {
+      state.locked = true;
+      state.role = null;
+      document.body.classList.add('is-locked');
+      $('#gate').hidden = false;
+      renderFeedStatus();
+      $('#gate-code').focus();
+    }
+    var error = $('#gate-error');
+    error.textContent = message || '';
+    error.hidden = !message;
+  }
+
+  function unlock(role) {
+    var was = state.locked;
+    state.role = role;
+    state.locked = false;
+    document.body.classList.remove('is-locked');
+    $('#gate').hidden = true;
+    $('#gate-error').hidden = true;
+    $('#lt-viewer-note').hidden = role !== 'viewer';
+    if (was) {
+      // Everything again, under the code that now works.
+      state.sinceTs = null;
+      load();
+    }
+  }
+
+  function wireGate() {
+    $('#gate-form').addEventListener('submit', function (event) {
+      event.preventDefault();
+      var input = $('#gate-code');
+      var code = input.value.trim();
+      if (!code) {
+        lock('Enter the code first.');
+        return;
       }
+      keepToken(code);
+      checkAccess().then(function (role) {
+        if (!role) {
+          lock('That code was not accepted. Check it and try again.');
+          input.select();
+          return;
+        }
+        input.value = '';
+        unlock(role);
+      }, function () {
+        lock('Could not reach the server. Try again in a moment.');
+      });
     });
   }
 
   function postJson(url, body) {
     var headers = { Accept: 'application/json', 'Content-Type': 'application/json' };
-    var token = savedToken() || $('#lt-token').value.trim();
+    // One typed below wins over the kept one: it is how a watcher who has the
+    // server's token starts a test.
+    var token = $('#lt-token').value.trim() || savedToken();
     if (token) {
       headers.Authorization = 'Bearer ' + token;
     }
@@ -2178,7 +2292,18 @@
         function (data) { return { ok: response.ok, status: response.status, data: data }; },
         function () { return { ok: false, status: response.status, data: {} }; }
       ).then(function (result) {
-        if (result.status === 401 && result.data.token_required) {
+        if (result.ok && token && token !== savedToken()) {
+          // Taken: keep it, and find out what it may do.
+          keepToken(token);
+          checkAccess().then(applyAccess, function () {});
+        }
+        if (result.data.view_only) {
+          $('#lt-token-row').hidden = false;
+          result.data.error = 'The watch-only code can follow a test but not start or stop ' +
+            'one. Enter the server\'s token below for that.';
+          $('#lt-token').value = '';
+          $('#lt-token').focus();
+        } else if (result.status === 401 && result.data.token_required) {
           $('#lt-token-row').hidden = false;
           result.data.error = token
             ? 'The server did not accept that token. Check it and try again.'
@@ -2521,7 +2646,7 @@
       params.push('cpu=' + encodeURIComponent(cpu));
     }
     return fetch('report' + (params.length ? '?' + params.join('&') : ''), {
-      headers: { Accept: 'application/json' }
+      headers: authHeaders({ Accept: 'application/json' })
     })
       .then(function (response) {
         return response.json().then(function (data) {
@@ -3043,7 +3168,7 @@
   // dev.py serves /dev-mode; server.py does not. A 404 leaves the banner
   // hidden, which is the production case.
   function checkDemoMode() {
-    fetch('dev-mode', { headers: { Accept: 'application/json' } })
+    fetch('dev-mode', { headers: authHeaders({ Accept: 'application/json' }) })
       .then(function (response) {
         return response.ok ? response.json() : null;
       })
@@ -3060,6 +3185,7 @@
   function init() {
     wireTheme();
     wireLoadTest();
+    wireGate();
     checkDemoMode();
 
     wireSegmented('#range-control', function (button) {
@@ -3124,6 +3250,9 @@
       }
     });
 
+    checkAccess().then(applyAccess, function () {
+      /* Unreachable: the polling says so, and finds out once it answers. */
+    });
     load();
     window.setInterval(load, POLL_MS);
     window.setInterval(renderFeedStatus, 1000);

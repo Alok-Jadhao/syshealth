@@ -20,6 +20,13 @@ terraform/*.tfvars
 terraform/*.tfvars.bak
 terraform/.relaunch.plan
 terraform/.terraform.lock.hcl
+# The address made once by terraform/domain (aws.sh domain): its state and what
+# aws.sh domain set it up with.
+terraform/.aws-domain
+terraform/domain/.terraform/
+terraform/domain/*.tfstate
+terraform/domain/*.tfstate.*
+terraform/domain/.terraform.lock.hcl
 
 # Reports saved by cli.py --save and terraform/rightsize.sh.
 rightsize-*.json

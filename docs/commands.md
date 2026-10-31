@@ -8,6 +8,8 @@ Start with the README's [Setup from zero](../README.md#setup-from-zero).
 |---|---|
 | See the dashboard on my laptop, no AWS | [`npm run dev`](#npm-run-dev) |
 | Build the test fleet on AWS, and take it down | [`./aws.sh up`](#awssh-up) / [`./aws.sh down`](#awssh-down) |
+| Get the token, and the code for an audience, from the terminal | [`./aws.sh token`](#awssh-token) |
+| Show it live at my own address, over HTTPS | [`./aws.sh domain`](#awssh-domain) |
 | Find which size to buy | [`./aws.sh test`](#awssh-test), or [`python3 cli.py run`](#clipy-run) |
 | Do the whole experiment in one go, and pay only while it runs | [`terraform/rightsize.sh`](#terraformrightsizesh) |
 | Run it on machines I set up myself | [`server.py`](#serverpy), [`syshealth.py`](#syshealthpy), [`deploy.sh`](#deploysh) |
@@ -84,12 +86,17 @@ What happens, in order:
 2. It makes an SSH key at `~/.ssh/syshealth_ed25519` if there is none, and a
    firewall that lets in only this machine's public IPv4 address.
 3. Terraform builds the machines (about a minute). Each one installs SysHealth
-   from GitHub and starts reporting.
+   from GitHub and starts reporting. With an address from
+   [`./aws.sh domain`](#awssh-domain), it also builds a load balancer for
+   `https://NAME` on that name's fixed IP address; the plan fails if the
+   certificate is not issued yet, so `up` checks that first.
 4. It waits until every size reports, four to eight minutes in all, up to 15
-   minutes at most.
-5. It prints the dashboard's address and token, and opens
-   `http://DASHBOARD:5000/#token=...`. The page keeps the token and takes it out
-   of the address bar, so **Start** works without pasting anything.
+   minutes at most, asking the dashboard's own port. With an address, it then
+   checks `https://NAME` answers.
+5. It prints the dashboard's address, the token and the watch-only code, and
+   opens `https://NAME/#token=...` (or `http://DASHBOARD:5000/#token=...`). The
+   page keeps the token and takes it out of the address bar, so it opens and
+   **Start** works without pasting anything.
 
 Running `up` again while the fleet is up changes it in place: a new address for
 the firewall after you change network, or other sizes with `--types`. To move it
@@ -102,7 +109,9 @@ to another region, `down` first.
 ./aws.sh down --yes     # does not
 ```
 
-Destroys everything `up` made: the machines, their firewall and the key pair.
+Destroys everything `up` made: the machines, their firewall, the key pair, and
+the load balancer if there is one. An address from `./aws.sh domain` stays, for
+the next `up`.
 Then it asks EC2 itself whether any of the machines is still running, and says
 so if one is. It refuses to run with credentials for a different AWS account
 from the one `up` built in, so a changed profile cannot leave a fleet running
@@ -111,14 +120,41 @@ unseen.
 ### `./aws.sh open`
 
 Opens the dashboard in your browser, signed in. Use it after closing the tab,
-or when **Start** says the token is wrong. With no desktop browser it prints
-the link instead; the link contains the token, so treat it like a password.
+or when the page asks for a code, or **Start** says the token is wrong. With no
+desktop browser it prints the link instead; the link contains the token, so
+treat it like a password.
+
+### `./aws.sh token`
+
+```bash
+./aws.sh token          # both codes, and a link with each
+./aws.sh token --raw    # the token alone, for a script
+```
+
+Prints the two codes the dashboard asks for, read from the fleet's Terraform
+state:
+
+- **Server token:** opens everything, and alone starts and stops tests. Yours.
+- **Watch-only code:** ten characters; opens everything and changes nothing.
+  The one to give an audience.
+
+With each, a link that carries it (`.../#token=...`), and with an address from
+[`./aws.sh domain`](#awssh-domain), a reminder that people can just open the
+address and type the code. Both are new on every `up`. Without `aws.sh`, from
+`terraform/`:
+
+```bash
+TF_WORKSPACE=fleet terraform output -raw token        # a fleet from ./aws.sh up
+TF_WORKSPACE=fleet terraform output -raw view_token
+terraform output -raw token                            # a fleet you applied by hand
+```
 
 ### `./aws.sh status`
 
 What is running, its addresses, how long it has been up, what it costs an hour
 and has cost so far (list prices), and each size's state. "Nothing is up" means
-nothing of the fleet exists.
+nothing of the fleet exists. With an address, it prints both: `https://NAME`,
+and the dashboard's own port, which works from this machine whatever DNS says.
 
 ### `./aws.sh test`
 
@@ -151,6 +187,52 @@ Sends your working tree to the fleet and restarts it, without rebuilding
 anything: the files git tracks, uncommitted changes included (`git add` a new
 file first). Restarting the dashboard empties its graphs, since history is kept
 in memory. Without `deploy`, the fleet runs what is on GitHub.
+
+### `./aws.sh domain`
+
+```bash
+./aws.sh domain syshealth.example.com --profile NAME   # once
+./aws.sh domain                                        # where it is; carries on if it stopped
+./aws.sh domain --remove                               # take it away (fleet down first)
+```
+
+Gives the dashboard an address of yours, over HTTPS, on every `up` from then
+on: for a live demo, where the audience opens it on their own phones.
+
+- **Needs:** a domain you own and can add DNS records to, and a name under it
+  for SysHealth alone (`syshealth.example.com`, not `example.com`). `dig` (in
+  `dnsutils`) lets it see when the records are in; without it, it just waits
+  for the certificate.
+- **Costs:** $3.65 a month for the fixed IP address, until `--remove` (AWS
+  bills every public IPv4 address $0.005 an hour). The certificate is free.
+  Each fleet's load balancer is about $0.03 an hour more while the fleet is up.
+
+| Option | Meaning | Default |
+|---|---|---|
+| `--profile NAME` | The AWS CLI profile | the fleet's, else `$AWS_PROFILE` |
+| `--region NAME` | Where the address and the certificate are made: it must be the fleet's | the fleet's, else `ap-south-1` |
+| `--yes` | Do not ask first | asks |
+| `--remove` | Give the address back and delete the certificate | |
+
+What happens, in order:
+
+1. It names the account and region and the cost, and asks.
+2. Terraform (`terraform/domain/`, state in that folder) reserves the fixed
+   IP address and asks for the certificate. It prints two records to add where
+   your domain's DNS is kept: an `A` record `syshealth` with that address, and
+   the certificate's `CNAME`. Nothing else there changes: a website on the
+   domain stays as it is. Plain `A` and `CNAME` records work with any DNS
+   host, Hostinger included, which cannot hand a subdomain to other name
+   servers.
+3. It asks your domain's own name servers every 20 seconds until both are
+   there, for up to an hour. Ctrl-C is safe; run it again to carry on.
+4. AWS checks the `CNAME` and issues the certificate, usually within ten
+   minutes. Leave the `CNAME` in place: the certificate renews itself through
+   it.
+
+`up` then builds behind it. After `--remove`, delete both records at your DNS
+host straight away: AWS may give the address to someone else, and the `A`
+record would send your name to them.
 
 ### `./aws.sh shortcuts`
 
@@ -213,7 +295,8 @@ Python's standard library.
 - **Which server:** `--server URL` before the subcommand, else `$SYSHEALTH_URL`,
   else `http://127.0.0.1:5000` (the demo).
 - **Token:** `$SYSHEALTH_TOKEN`, an environment variable so it stays out of your
-  shell history. Only starting and stopping tests need it.
+  shell history. A server with a token answers nothing without it; to read
+  only, the watch-only code works too.
 
 ### `cli.py status`
 
@@ -305,8 +388,9 @@ The central server and the dashboard, on port 5000 on every interface.
 - **Needs:** Flask and requests. With waitress installed it serves with that;
   without it, Flask's development server, and it says so.
 - **Settings:** `SYSHEALTH_TOKEN` (strongly advised: without it anyone who can
-  reach port 5000 can start a test), `SYSHEALTH_PRICES_FILE` and
-  `SYSHEALTH_PRICE_REGION` ([settings](../README.md#settings)).
+  reach port 5000 can see everything and start a test), `SYSHEALTH_VIEW_TOKEN`
+  for a watch-only code, `SYSHEALTH_PRICES_FILE` and `SYSHEALTH_PRICE_REGION`
+  ([settings](../README.md#settings)).
 - History is kept in memory, so a restart empties the graphs.
 
 ### `syshealth.py`
@@ -341,7 +425,8 @@ SERVER=1.2.3.4 AGENTS="5.6.7.8" SYSHEALTH_TOKEN=... ./deploy.sh agents          
 
 Sends the files git tracks (uncommitted changes included) to machines set up
 by hand into `~/syshealth`, and restarts them with the token, pointing the
-agents at `http://$SERVER:5000/metrics`. `KEY` names the SSH key (default
+agents at `http://$SERVER:5000/metrics`. `SYSHEALTH_VIEW_TOKEN`, if set, goes to
+the server as its watch-only code. `KEY` names the SSH key (default
 `syshealth-key.pem`). For a fleet from `aws.sh`, use `./aws.sh deploy`.
 
 ---

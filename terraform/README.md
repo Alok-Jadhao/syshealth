@@ -75,12 +75,16 @@ still missing:
 ./check.sh
 ```
 
-Open **Load test**, enter the memory your app needs, and start it. The first
-Start asks for the fleet's token, which Terraform made:
+The page asks for a code before it shows anything: the fleet's token, which
+Terraform made, or the watch-only code, which shows everything and starts
+nothing (the one for an audience):
 
 ```bash
 terraform output -raw token
+terraform output -raw view_token
 ```
+
+Open **Load test**, enter the memory your app needs, and start it.
 
 A peak test holds one level; a variable test ramps, waves or bursts between two. The four
 are asked at the same moment, in parallel, because staggered starts would pull
@@ -138,15 +142,30 @@ are written down, so nothing drifts.
 
 **A token per fleet.** `random_password.token` is handed to the server and
 every agent (`SYSHEALTH_TOKEN` in their systemd units). Agents send it with each
-push; starting or stopping a test needs it, from the dashboard, `cli.py` or the
-MCP server; and each agent's control port refuses anything without it. It
-lives in the Terraform state, which is gitignored, and in the instances' user
-data, readable from the instance itself and by anyone in the AWS account
-allowed to read instance attributes.
+push; seeing anything needs it; starting or stopping a test needs it, from the
+dashboard, `cli.py` or the MCP server; and each agent's control port refuses
+anything without it. `random_id.view_token` is the server's watch-only code
+(`SYSHEALTH_VIEW_TOKEN`): ten hex digits that show everything and change
+nothing, short enough to type on a phone. Both live in the Terraform state,
+which is gitignored, and in the instances' user data, readable from the
+instance itself and by anyone in the AWS account allowed to read instance
+attributes.
 
-**`ssh_cidr` also gates the dashboard UI, and rejects `0.0.0.0/0`.** The token
-guards starting a test, but anyone who can reach port 5000 can still read
-everything the fleet reports. One address only.
+**`ssh_cidr` also gates the dashboard's own port, and rejects `0.0.0.0/0`.**
+SSH and port 5000 are for you alone, even though the page shows nothing
+without a code.
+
+**Your own address, over HTTPS, for everyone else (`domain_name`).** Set it to
+a name such as `syshealth.example.com`, and `https.tf` adds a network load
+balancer open to anyone on 443 (HTTPS only, nothing on 80), forwarding to port
+5000. It sits on a fixed IP address, which is not part of the fleet: `domain/`
+reserves it once, with the certificate, so the `A` record pointing the name at
+it survives every destroy (`../aws.sh domain` runs it; by hand,
+`terraform -chdir=domain apply -var domain_name=...`, then add the `records`
+output at your DNS host). No Route 53 zone: plain `A` and `CNAME` records work
+with any DNS host, including those that cannot hand a subdomain to other name
+servers. The load balancer is about $0.03 an hour while it exists; the address
+$3.65 a month.
 
 **A 512 MiB swapfile on the agents, by default.** With no swap, a `stress` run
 on a `t3.micro` reaches the OOM killer almost at once: one spike and a dead

@@ -349,7 +349,7 @@
         ],
         'Nothing else on the machines changes. Extra swap, if you ask for it, is added for the ' +
         'test and removed after.',
-        'Anyone who can open this page can watch. Only someone with the server\'s token can ' +
+        'Anyone with the watch-only code can watch. Only someone with the server\'s token can ' +
         'start or stop a test.'
       ]
     },
@@ -506,9 +506,21 @@
       title: 'Server token',
       body: [
         'A password for this dashboard\'s server. Starting or stopping a test needs it; ' +
-        'watching does not.',
-        'The page opened by ./aws.sh up or ./aws.sh open has it filled in already. Otherwise ' +
-        'it is SYSHEALTH_TOKEN on the server. It is kept in this browser only.'
+        'watching needs it or the watch-only code.',
+        'The page opened by ./aws.sh up or ./aws.sh open has it filled in already, and ' +
+        './aws.sh token prints it. Otherwise it is SYSHEALTH_TOKEN on the server. It is kept ' +
+        'in this browser only.'
+      ]
+    },
+
+    access: {
+      title: 'Access code',
+      body: [
+        'This dashboard\'s server shows its machines only to someone with a code, so a link ' +
+        'passed around shows nothing on its own.',
+        'Two codes work. The watch-only code shows everything and changes nothing: it is the ' +
+        'one to give an audience. The server\'s token also starts and stops tests.',
+        'Whoever runs the fleet gets both from the terminal with ./aws.sh token.'
       ]
     },
 

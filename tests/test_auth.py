@@ -1,4 +1,4 @@
-"""The shared token: what it guards, what it leaves open, and who sends it.
+"""The shared token and the watch-only code: what each opens, and who sends it.
 
     python3 -m unittest discover -s tests      # or: npm test
 
@@ -24,8 +24,11 @@ import server  # noqa: E402
 import syshealth  # noqa: E402
 
 TOKEN = "s3cret-token"
+VIEW = "a1b2c3d4e5"
 logging.getLogger("werkzeug").setLevel(logging.ERROR)   # no request log in the test output
 BEARER = {"Authorization": "Bearer " + TOKEN}
+WATCHER = {"Authorization": "Bearer " + VIEW}
+READS = ("/series", "/instances", "/report", "/metrics", "/summary", "/access")
 
 
 def sample(host="box-1", **extra):
@@ -38,13 +41,14 @@ def sample(host="box-1", **extra):
 class TokenCase(unittest.TestCase):
 
     def setUp(self):
-        self.saved = (server.TOKEN, syshealth.TOKEN, cli.TOKEN)
+        self.saved = (server.TOKEN, server.VIEW_TOKEN, syshealth.TOKEN, cli.TOKEN)
+        server.VIEW_TOKEN = None
         server.instances.clear()
         server.tests.clear()
         self.client = server.app.test_client()
 
     def tearDown(self):
-        server.TOKEN, syshealth.TOKEN, cli.TOKEN = self.saved
+        server.TOKEN, server.VIEW_TOKEN, syshealth.TOKEN, cli.TOKEN = self.saved
         server.instances.clear()
         server.tests.clear()
 
@@ -76,12 +80,57 @@ class ServerTokenTest(TokenCase):
         self.assertEqual(self.client.post("/stop-stress").status_code, 401)
         self.assertEqual(self.client.post("/stop-stress", headers=BEARER).status_code, 200)
 
-    def test_reading_stays_open(self):
+    def test_reading_needs_the_token_too(self):
         server.TOKEN = TOKEN
-        for path in ("/", "/series", "/instances", "/report", "/metrics"):
-            self.assertEqual(self.client.get(path).status_code, 200, path)
         peak = {"mode": "peak", "memory_mb": 100, "duration_sec": 10, "workers": 1}
-        self.assertEqual(self.client.post("/load-plan", json=peak).status_code, 200)
+        for path in READS:
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 401, path)
+            self.assertTrue(response.get_json()["token_required"], path)
+            self.assertEqual(self.client.get(path, headers=BEARER).status_code, 200, path)
+        self.assertEqual(self.client.post("/load-plan", json=peak).status_code, 401)
+        self.assertEqual(self.client.post("/load-plan", json=peak, headers=BEARER).status_code, 200)
+
+    def test_the_page_itself_needs_nothing(self):
+        # It holds no data, and it is where the code is typed in.
+        server.TOKEN = TOKEN
+        self.assertEqual(self.client.get("/").status_code, 200)
+        with self.client.get("/static/js/dashboard.js") as response:
+            self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.get("/no-such-page").status_code, 404)
+
+    def test_the_watch_only_code_watches(self):
+        server.TOKEN, server.VIEW_TOKEN = TOKEN, VIEW
+        for path in READS:
+            self.assertEqual(self.client.get(path, headers=WATCHER).status_code, 200, path)
+        peak = {"mode": "peak", "memory_mb": 100, "duration_sec": 10, "workers": 1}
+        self.assertEqual(self.client.post("/load-plan", json=peak, headers=WATCHER).status_code, 200)
+
+    def test_the_watch_only_code_changes_nothing(self):
+        server.TOKEN, server.VIEW_TOKEN = TOKEN, VIEW
+        peak = {"mode": "peak", "memory_mb": 100, "duration_sec": 10, "workers": 1}
+        response = self.client.post("/run-stress", json=peak, headers=WATCHER)
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(response.get_json()["view_only"])
+        self.assertEqual(len(server.tests), 0)
+        self.assertEqual(self.client.post("/stop-stress", headers=WATCHER).status_code, 403)
+        self.assertEqual(self.client.post("/metrics", json=sample(), headers=WATCHER).status_code, 403)
+        self.assertNotIn("box-1", server.instances)
+
+    def test_access_says_what_a_token_can_do(self):
+        server.TOKEN, server.VIEW_TOKEN = TOKEN, VIEW
+        self.assertEqual(self.client.get("/access", headers=BEARER).get_json()["role"], "operator")
+        self.assertEqual(self.client.get("/access", headers=WATCHER).get_json()["role"], "viewer")
+        self.assertEqual(self.client.get("/access", headers={"Authorization": "Bearer nope"})
+                         .status_code, 401)
+        server.TOKEN = None
+        self.assertEqual(self.client.get("/access").get_json()["role"], "operator")
+
+    def test_a_watch_only_code_alone_guards_nothing(self):
+        # Without the token there is nothing to check against: open, as before.
+        server.TOKEN, server.VIEW_TOKEN = None, VIEW
+        self.assertEqual(self.client.get("/series").status_code, 200)
+        self.assertEqual(self.client.post("/metrics", json=sample()).status_code, 200)
 
     def test_watch_only_machines_are_never_asked(self):
         server.TOKEN = None
@@ -151,7 +200,9 @@ class CliTokenTest(TokenCase):
         with self.assertRaises(cli.CliError) as caught:
             cli.call(self.url, "/stop-stress", {})
         self.assertIn("SYSHEALTH_TOKEN", str(caught.exception))
-        # Reading needs nothing.
+        with self.assertRaises(cli.CliError):
+            cli.call(self.url, "/series?limit=1")
+        cli.TOKEN = TOKEN
         self.assertIn("instances", cli.call(self.url, "/series?limit=1"))
 
 

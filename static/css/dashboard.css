@@ -1763,3 +1763,39 @@ main {
   color: var(--text-primary);
   font-weight: 600;
 }
+
+/* Until the server accepts a code, the page is the access form alone. */
+body.is-locked main > :not(#gate),
+body.is-locked .topbar-right > :not(.feed):not(#theme-toggle) {
+  display: none;
+}
+
+.gate {
+  max-width: 30rem;
+  margin: 48px auto;
+  padding: 20px;
+}
+
+.gate-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.gate-form .field {
+  flex: 1 1 12rem;
+}
+
+.gate-form .input-unit input {
+  max-width: none;
+}
+
+.gate-form .lt-error {
+  flex-basis: 100%;
+}
+
+#lt-viewer-note {
+  margin: 8px 0 0;
+}

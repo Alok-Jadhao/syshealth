@@ -37,6 +37,7 @@ slow.
 | See what it does, in two minutes, on your laptop | [Preview it locally](#preview-it-locally) | Python 3 and Flask. No AWS |
 | Know what the dashboard shows | [Dashboard](#dashboard), or press **Guide** and any **?** on the page | Nothing |
 | Find the right size on real AWS machines | [Setup from zero](#setup-from-zero), then [Run it on AWS](#run-it-on-aws-one-command-up-one-down) | An AWS account; about $0.19 an hour while the fleet is up |
+| Show it live, at your own address, with the audience following on their phones | [Your own address, for a live demo](#your-own-address-for-a-live-demo) | A domain you own; $3.65 a month, plus about $0.03 an hour while the fleet is up |
 | Use machines you set up yourself | [Quick Start (manual)](#quick-start-manual) | Linux machines you can reach over SSH |
 | Look up a command or a setting | [docs/commands.md](docs/commands.md), [Settings](#settings) | Nothing |
 | Understand the numbers | [How it works](#how-it-works), [Health Classification](#health-classification), [Glossary](#glossary) | Nothing |
@@ -139,7 +140,7 @@ put the t3.micro's limit at 1,400 MB instead of 800 MB. At 800 MB it was stalled
 
 ```
              Your laptop: browser · ./aws.sh · cli.py · AI agent (MCP)
-                              │  reads results; starts tests with the token
+                              │  reads results with a code; starts tests with the token
                               ▼
                ┌──────────────────────────────┐
                │  Server and dashboard  :5000 │  server.py: keeps an hour of samples,
@@ -346,11 +347,13 @@ and Terraform. Then:
 `up` first says which account and region it will use and what that costs
 (about $0.19 an hour in Mumbai, the default region), and asks before going on.
 It builds the fleet, waits until every size is reporting (four to eight
-minutes), prints the dashboard's address and token, and opens the dashboard in
-your browser already signed in: the token rides after the `#` in the link,
-which the browser never sends to the server, so **Start** works without pasting
-it (`--no-open` skips that; `./aws.sh open` does it again later). There is
-nothing to prepare by hand:
+minutes), prints the dashboard's address, its token and its watch-only code,
+and opens the dashboard in your browser already signed in: the token rides
+after the `#` in the link, which the browser never sends to the server, so the
+page opens and **Start** works without pasting it (`--no-open` skips that;
+`./aws.sh open` does it again later). The page shows nothing to anyone without
+a code ([below](#who-can-see-it-and-who-can-start-a-test)). There is nothing to
+prepare by hand:
 - **SSH key:** it makes one at `~/.ssh/syshealth_ed25519`.
 - **Firewall:** it lets in only this machine's address.
 - **Account:** it remembers which account it built in, and `down` refuses to
@@ -371,6 +374,7 @@ While it is up:
 
 ```bash
 ./aws.sh open                 # the dashboard in your browser, signed in
+./aws.sh token                # the token and the watch-only code, from the terminal
 ./aws.sh status               # what is running, since when, what it has cost
 ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # which size to buy
 ./aws.sh ssh t3.small         # a shell on one machine (or: dashboard)
@@ -387,6 +391,43 @@ sizes. If you move to another network, run `up` again: it moves the firewall to
 your new address.
 [`terraform/README.md`](terraform/README.md) has the plain-Terraform route,
 costs and design notes.
+
+### Your own address, for a live demo
+
+Out of the box the dashboard is `http://<ip>:5000`, a new address on every
+`up`, and only your own machine can open it. Give it a name of yours instead,
+such as `syshealth.example.com`, and it is served over HTTPS at that name on
+every `up`, to anyone: people in the room open it on their phones and type the
+watch-only code. They see everything live, and cannot start or stop a test.
+
+Once, with a subdomain of a domain you own:
+
+```bash
+./aws.sh domain syshealth.example.com --profile NAME
+```
+
+It reserves a fixed IP address for the name ($3.65 a month) and asks for an
+HTTPS certificate (free, renews itself), then prints two records: an `A` record
+`syshealth` pointing at that address, and a `CNAME` that proves the name is
+yours. Add both where your domain's DNS is kept (its registrar or DNS host),
+and change nothing else there: the rest of the domain, a website on it
+included, stays where it is. It waits until they appear and AWS issues the
+certificate, usually within ten minutes; Ctrl-C is safe, and running
+`./aws.sh domain` again carries on and shows the records again.
+
+From then on, `./aws.sh up` (and the **SysHealth demo on** icon) puts a load
+balancer on that address in front of the dashboard, for about $0.03 an hour
+more; `./aws.sh down` takes it away, and the address and the records stay for
+the next `up`. HTTPS only: hand out the link with `https://` in it. Before the
+demo:
+
+```bash
+./aws.sh token      # the token (yours) and the watch-only code (for the room)
+```
+
+Put the address and the code on a slide. `./aws.sh domain --remove` gives the
+address back (with the fleet down); then delete the two records at once, as
+AWS may give the address to someone else.
 
 ---
 
@@ -489,6 +530,8 @@ every option, and what it does step by step.
 | `./aws.sh up --profile NAME` | Build the fleet on AWS and open the dashboard, signed in |
 | `./aws.sh down` | Destroy all of it |
 | `./aws.sh open` | Open the dashboard again, signed in |
+| `./aws.sh token` | Print the token and the watch-only code, with a link for each |
+| `./aws.sh domain NAME --profile NAME` | Once: serve the dashboard at `https://NAME` on every `up` |
 | `./aws.sh status` | What is running, and what it has cost |
 | `./aws.sh test --need MB --ramp LOW:HIGH ...` | Run a load test and print which size to buy |
 | `./aws.sh ssh SIZE` | A shell on one machine (`dashboard`, `t3.micro`, ...) |
@@ -512,7 +555,8 @@ required.
 | Variable | Read by | Meaning | Default |
 |---|---|---|---|
 | `SYSHEALTH_SERVER_URL` | agent | Where to send samples: `http://SERVER_IP:5000/metrics` | none; required |
-| `SYSHEALTH_TOKEN` | server, agent, `cli.py`, MCP server, `deploy.sh` | The shared secret. Agents send it with every sample, and starting or stopping a test needs it ([below](#who-can-start-a-test)) | none: nothing is checked |
+| `SYSHEALTH_TOKEN` | server, agent, `cli.py`, MCP server, `deploy.sh` | The shared secret. Agents send it with every sample, seeing anything needs it or the watch-only code, and starting or stopping a test needs it alone ([below](#who-can-see-it-and-who-can-start-a-test)) | none: nothing is checked |
+| `SYSHEALTH_VIEW_TOKEN` | server, `deploy.sh` | The watch-only code: shows everything, changes nothing. For an audience | none |
 | `SYSHEALTH_APP` | agent | Also watch your app's own cgroup: a systemd unit (`myapp.service`) or a cgroup path ([below](#measure-your-app-not-the-whole-machine)) | off |
 | `SYSHEALTH_CONTROL` | agent | `off`: report as usual, but never take a load test. For production machines | on |
 | `SYSHEALTH_INSTANCE_TYPE`, `SYSHEALTH_INSTANCE_REGION`, `SYSHEALTH_INSTANCE_ID`, `SYSHEALTH_INSTANCE_NAME` | agent | The machine's size, region, id and name, for machines off EC2 | read from EC2, else the hostname |
@@ -573,7 +617,8 @@ reported as each machine's idle reference, but states no longer depend on it.
 | **Need** | Your app's memory at its busiest. Each size is judged against it |
 | **Margin, spare** | Room to keep above the need: 25% unless you change it |
 | **Capacity, "holds up to"** | The most memory a size held while still HEALTHY |
-| **Token** | The shared secret that lets you start and stop tests. Each fleet gets a new one |
+| **Token** | The shared secret that opens the dashboard and starts and stops tests. Each fleet gets a new one: `./aws.sh token` |
+| **Watch-only code** | A second, shorter code that opens the dashboard and changes nothing: the one to give an audience. Each fleet gets a new one |
 | **Baseline** | A machine's idle reading, measured by `calibrate`. For reference only |
 
 ---
@@ -582,7 +627,8 @@ reported as each machine's idle reference, but states no longer depend on it.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| GET | `/` | Live dashboard |
+| GET | `/` | Live dashboard (the page itself: it asks for a code before it shows any data) |
+| GET | `/access` | What the code you send may do: `{"role": "operator"}` (the token), `"viewer"` (the watch-only code), or 401 |
 | POST | `/metrics` | Agent metric push (token). A sample with a field of the wrong type is turned away with 422 and the field's name, so it cannot break the pages |
 | GET | `/metrics` | Everything above for Prometheus to scrape ([below](#with-prometheus)) |
 | GET | `/instances` | All instances with online status and latest metrics |
@@ -594,12 +640,15 @@ reported as each machine's idle reference, but states no longer depend on it.
 | POST | `/stop-stress` | Stop the running load test on all online agents (token) |
 | GET | `/report` | Which size to buy, from the last test: `?need_mb=` your app's peak, `?margin=` % spare, `?cpu=` its average vCPUs, `?test_id=` an earlier test |
 
-"(token)": with `SYSHEALTH_TOKEN` set on the server, these need
-`Authorization: Bearer <token>` ([below](#who-can-start-a-test)). Reading is
-open to anyone who can reach the port.
+With `SYSHEALTH_TOKEN` set on the server, every endpoint but `/` needs
+`Authorization: Bearer <code>`: the token, or the watch-only code for reading.
+"(token)" marks the ones only the token opens
+([below](#who-can-see-it-and-who-can-start-a-test)).
 
 ```bash
 # List all instances
+export SYSHEALTH_TOKEN=<the server's token>     # or the watch-only code, to read
+curl -H "Authorization: Bearer $SYSHEALTH_TOKEN" http://YOUR_SERVER_IP:5000/instances
 curl http://YOUR_SERVER_IP:5000/instances
 
 # The old fixed test: 1.6 GB (2 workers x 800 MB) for 60 s
@@ -879,25 +928,33 @@ then test the sizes on a fleet built for that.
 
 ---
 
-## Who can start a test
+## Who can see it, and who can start a test
 
 A load test fills memory on every machine that takes one, so starting one is
-guarded. Set the same `SYSHEALTH_TOKEN` on the server and every agent:
+guarded, and so is seeing the machines at all. Set the same `SYSHEALTH_TOKEN`
+on the server and every agent:
 
 - agents send it with every push, and the server drops pushes without it;
+- the server shows nothing without it (or the watch-only code, below): the
+  page opens on a box asking for a code, and every endpoint but `/` answers
+  401;
 - the server wants it to start or stop a test, and passes it on to each
   agent's control port (5001), which refuses anything without it;
-- the dashboard asks for it the first time you press **Start**, and keeps it
-  in that browser only. Opened as `http://SERVER:5000/#token=<token>`, as
-  `./aws.sh up` and `./aws.sh open` do, it takes it from the link instead, and
-  takes it out of the address bar; `cli.py` and the MCP server read
-  `$SYSHEALTH_TOKEN`.
+- the dashboard keeps it in that browser only. Opened as
+  `http://SERVER:5000/#token=<token>`, as `./aws.sh up` and `./aws.sh open` do,
+  it takes it from the link, and takes it out of the address bar; `cli.py` and
+  the MCP server read `$SYSHEALTH_TOKEN`.
 
-`terraform/` makes one for each fleet (`terraform output -raw token`), and
-`rightsize.sh` uses it for you. Without a token nothing is checked, as before,
-and the agent says so when it starts; the security groups in `terraform/` then
-remain the only guard. Reading (the dashboard, `/series`, `/report`,
-`/metrics`) stays open to anyone who can reach port 5000.
+**The watch-only code** (`SYSHEALTH_VIEW_TOKEN`) is a second, short code for an
+audience. It shows everything the token does, live, and changes nothing:
+**Start** and **Stop** answer that they need the token, and a push with it is
+refused. Type the token under the form to start a test from that page.
+
+`terraform/` makes both for each fleet, new every time
+(`terraform output -raw token`, `terraform output -raw view_token`), and
+`./aws.sh token` prints both, with a link for each. Without a token nothing is
+checked, as before, and the agent says so when it starts; the security groups
+in `terraform/` then remain the only guard.
 
 ---
 
@@ -949,6 +1006,8 @@ The server answers `GET /metrics` in Prometheus's text format (agents keep
 ```yaml
 scrape_configs:
   - job_name: syshealth
+    authorization:
+      credentials: <the watch-only code, or the token>   # when the server has a token
     static_configs:
       - targets: ["YOUR_SERVER_IP:5000"]
 ```
@@ -980,7 +1039,13 @@ Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and
 | `terraform` or `aws`: command not found | Not installed | [Setup, step 3](#3-for-aws-the-aws-cli-terraform-and-an-access-key) |
 | The dashboard stopped loading | Your network changed, and the firewall lets in only the old address | `./aws.sh up` again: it moves the firewall and keeps the machines |
 | "Not every size is reporting yet" at the end of `up` | One machine is still installing, or its setup failed | Wait a minute, then `./aws.sh status`. Still missing: `./aws.sh ssh <size> sudo tail -30 /var/log/syshealth-bootstrap.log` |
+| The page asks for an access code | The server shows nothing without its token or watch-only code, and the browser has neither, or one from an earlier fleet: each fleet gets new ones | `./aws.sh open` opens it signed in; `./aws.sh token` prints both codes |
+| **Start** says the watch-only code cannot start a test | That browser has the audience's code | Type the token in the field under the form, or `./aws.sh open` |
 | **Start** asks for the token, or says it is wrong | The page has none, or one from an earlier fleet: each fleet gets a new token | `./aws.sh open` |
+| `./aws.sh domain` waits for the records | They are not at your DNS host yet, or are under the wrong name | Check them against what it printed (names without your domain: `syshealth`, not `syshealth.example.com`); run it again to see them |
+| `./aws.sh up`: the certificate is not issued yet | `./aws.sh domain` did not finish | `./aws.sh domain`: it carries on and says what it waits for |
+| `https://` your name does not open just after `up` | The load balancer takes a minute or two to start | Wait; `up` checks it and says so. From your own machine, the address `./aws.sh status` prints works meanwhile |
+| `http://` your name does not open | Only HTTPS is served | Use the `https://` link |
 | `InsufficientInstanceCapacity` while building | AWS has no room for that size there right now | `./aws.sh down`, then `./aws.sh up --region eu-west-1` (or another region) |
 | Every card reads 0% | Nothing is waiting for memory: an idle machine is healthy | Run a load test |
 | A card says **RAN OUT OF MEMORY** | The load did not fit, and the kernel killed it | Not a fault: that size is too small for that load |
@@ -1009,7 +1074,7 @@ syshealth/
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
 ├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
-├── aws.sh             # The fleet on AWS: up, down, status, test, ssh, deploy
+├── aws.sh             # The fleet on AWS: up, down, status, token, test, ssh, deploy, domain
 ├── deploy.sh          # Deploy to EC2 instances you launched by hand
 ├── templates/
 │   └── index.html     # Dashboard markup
@@ -1028,11 +1093,13 @@ syshealth/
 │   ├── thresholds.md  # What the number means; the research behind each threshold
 │   ├── img/real-run-2026-10-19.svg  # The picture at the top, from the real run's report
 │   ├── make_result_figure.py        # Draws it: python3 docs/make_result_figure.py REPORT.json
-│   ├── syshealth-demo-runbook.pdf   # The live demo, step by step, on four pages
+│   ├── syshealth-demo-runbook.pdf   # The live demo, step by step, on five pages
 │   └── make_runbook.py              # Rebuilds that PDF (needs reportlab)
 └── terraform/         # Dashboard + one instance per size, in one apply
     ├── README.md      # The plain-Terraform route, costs, design notes, troubleshooting
     ├── main.tf, variables.tf, outputs.tf, *.tftpl   # The fleet, and how each machine sets itself up
+    ├── https.tf       # With domain_name: the load balancer on your address
+    ├── domain/main.tf # Your address, made once: its fixed IP and certificate
     ├── check.sh       # Which sizes are reporting, and why one is not
     ├── common.sh      # Shared by aws.sh, rightsize.sh and deploy.sh
     ├── relaunch.sh    # Bring a hand-built fleet back up, checking what has broken it before

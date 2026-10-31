@@ -47,7 +47,7 @@ variable "ssh_cidr" {
 
   validation {
     condition     = var.ssh_cidr != "0.0.0.0/0"
-    error_message = "Refusing 0.0.0.0/0. The dashboard exposes /run-stress with no authentication, so anyone reaching it could load your instances. Use your own address, e.g. \"203.0.113.4/32\"."
+    error_message = "Refusing 0.0.0.0/0: SSH and the dashboard's own port are for you alone. Use your own address, e.g. \"203.0.113.4/32\". To let others see the dashboard, give it an address with domain_name: that way is HTTPS, and the page asks for a code."
   }
 
   # Caught here because the provider's own complaint is three identical repeats
@@ -77,6 +77,18 @@ variable "ssh_cidr" {
     )
     error_message = "ssh_cidr must name the start of its block. For a single address use a /32, e.g. \"203.0.113.4/32\"; for a range, name the network address, e.g. \"203.0.113.0/24\"."
   }
+}
+
+variable "domain_name" {
+  description = <<-EOT
+    Serve the dashboard at https://<this>, e.g. syshealth.example.com, through
+    a load balancer open to anyone (the page still needs a code). Its fixed
+    address and its certificate must exist already, issued, in this region:
+    made once by domain/, which ../aws.sh domain runs. Leave null for
+    http://<ip>:5000, reachable from ssh_cidr only.
+  EOT
+  type        = string
+  default     = null
 }
 
 variable "repo_url" {

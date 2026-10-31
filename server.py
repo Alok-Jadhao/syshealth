@@ -27,12 +27,17 @@ ONLINE_WINDOW_SEC = 15
 AGENT_CONTROL_PORT = 5001
 TESTS_KEPT = 50
 
-# One shared secret for everything that changes state: agents pushing samples,
-# and anyone starting or stopping a load test. The server passes it on to the
-# agents' control ports. Unset, nothing is checked, and the network (the
-# security groups in terraform/) is the only guard.
+# Two secrets. The token does everything: agents push samples with it, and
+# starting or stopping a load test needs it (the server passes it on to the
+# agents' control ports). The watch-only code, if set, shows everything but
+# changes nothing: it is the one to give an audience. With a token set, only
+# the page itself, which holds no data, answers without one of the two. Unset,
+# nothing is checked, and the network (the security groups in terraform/) is
+# the only guard.
 TOKEN = os.environ.get("SYSHEALTH_TOKEN", "").strip() or None
+VIEW_TOKEN = os.environ.get("SYSHEALTH_VIEW_TOKEN", "").strip() or None
 GUARDED = {("POST", "receive_metrics"), ("POST", "run_stress"), ("POST", "stop_stress")}
+OPEN = {"home", "static"}
 
 instances = defaultdict(lambda: {
     "hostname": None,
@@ -65,18 +70,40 @@ def record_stop(now):
             recorded.setdefault("stopped", now)
 
 
-def token_ok(header):
-    """Whether an Authorization header carries this server's token."""
+def access(header):
+    """What an Authorization header lets its sender do: "operator" (anything),
+    "viewer" (watch only) or None (nothing but the page)."""
     if not TOKEN:
-        return True
+        return "operator"
     scheme, _, value = (header or "").partition(" ")
-    return scheme.lower() == "bearer" and hmac.compare_digest(value.strip().encode(), TOKEN.encode())
+    if scheme.lower() != "bearer":
+        return None
+    value = value.strip().encode()
+    if hmac.compare_digest(value, TOKEN.encode()):
+        return "operator"
+    if VIEW_TOKEN and hmac.compare_digest(value, VIEW_TOKEN.encode()):
+        return "viewer"
+    return None
 
 
 @app.before_request
 def require_token():
-    if (request.method, request.endpoint) in GUARDED and not token_ok(request.headers.get("Authorization")):
+    # No endpoint means no such page: let it answer 404 as itself.
+    if request.endpoint in OPEN or request.endpoint is None:
+        return None
+    role = access(request.headers.get("Authorization"))
+    if role == "operator":
+        return None
+    if (request.method, request.endpoint) in GUARDED:
+        if role == "viewer":
+            return jsonify({"error": "The watch-only code can follow a test but not start or stop "
+                                     "one. That needs the server's token (SYSHEALTH_TOKEN).",
+                            "token_required": True, "view_only": True}), 403
         return jsonify({"error": "This server needs its token (SYSHEALTH_TOKEN) to do that.",
+                        "token_required": True}), 401
+    if role is None:
+        return jsonify({"error": "This server shows its machines only with its token "
+                                 "(SYSHEALTH_TOKEN) or its watch-only code (SYSHEALTH_VIEW_TOKEN).",
                         "token_required": True}), 401
     return None
 
@@ -85,6 +112,12 @@ def require_token():
 def home():
     # The preset behind "Show all three states", from the one place it is kept.
     return render_template("index.html", three_states=json.dumps(loadtest.THREE_STATES_SPEC))
+
+
+@app.route("/access", methods=["GET"])
+def access_role():
+    """What the caller's token lets them do, so the page can say so."""
+    return jsonify({"role": access(request.headers.get("Authorization"))})
 
 
 @app.route("/metrics", methods=["POST"])

@@ -59,9 +59,10 @@ wait
 
 echo
 echo "Baselines now in use:"
-URL=$(terraform output -raw dashboard_url 2>/dev/null)
+URL=$(terraform output -raw direct_url 2>/dev/null || terraform output -raw dashboard_url 2>/dev/null)
+TOKEN=$(terraform output -raw token 2>/dev/null)
 sleep 12   # let each agent push at least once with the new value
-curl -s --max-time 10 "$URL/instances" 2>/dev/null | python3 -c "
+curl -s --max-time 10 -H "Authorization: Bearer $TOKEN" "$URL/instances" 2>/dev/null | python3 -c "
 import json, sys
 try:
     rows = json.load(sys.stdin)

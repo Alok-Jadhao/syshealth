@@ -112,11 +112,11 @@ trap 'exit 130' INT TERM
 
 echo "Creating the fleet (a few minutes)..."
 terraform apply -auto-approve -input=false "${TF_VARS[@]}" >/dev/null
-URL=$(terraform output -raw dashboard_url)
+URL=$(terraform output -raw direct_url)
 # The fleet's own secret: cli.py sends it, and the dashboard asks for it.
 SYSHEALTH_TOKEN=$(terraform output -raw token)
 export SYSHEALTH_TOKEN
-echo "Dashboard: $URL  (to start a test from it: terraform output -raw token)"
+echo "Dashboard: $URL  (it asks for a code: terraform output -raw token)"
 
 # Installing, calibrating and the first minute of samples take a while.
 python3 ../cli.py --server "$URL" wait --count "$COUNT" --timeout 900

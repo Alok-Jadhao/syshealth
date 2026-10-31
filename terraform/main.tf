@@ -56,6 +56,13 @@ resource "random_password" "token" {
   special = false
 }
 
+# The watch-only code: shows the dashboard, changes nothing. Short, because an
+# audience types it on a phone; ten hex digits are still far too many to guess
+# while a fleet is up. Read it with `terraform output -raw view_token`.
+resource "random_id" "view_token" {
+  byte_length = 5
+}
+
 # The default VPC keeps this to one file with no NAT gateway to pay for. Server
 # and agents share it, so they reach each other over private addresses.
 data "aws_vpc" "default" {
@@ -153,8 +160,9 @@ resource "aws_vpc_security_group_ingress_rule" "server_ssh" {
   ip_protocol       = "tcp"
 }
 
-# /run-stress can load every agent. It needs the token too, but the UI is
-# reachable from one address only all the same.
+# /run-stress can load every agent. It needs the token, and seeing anything
+# needs a code, but port 5000 is reachable from one address only all the
+# same: anyone else comes in over HTTPS (https.tf), or not at all.
 resource "aws_vpc_security_group_ingress_rule" "server_ui" {
   security_group_id = aws_security_group.server.id
   description       = "Dashboard UI, operator only"
@@ -226,6 +234,7 @@ resource "aws_instance" "server" {
     repo_url    = var.repo_url
     repo_branch = var.repo_branch
     token       = random_password.token.result
+    view_token  = random_id.view_token.hex
   })
 
   metadata_options {

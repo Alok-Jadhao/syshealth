@@ -8,6 +8,8 @@
 #   SERVER           the dashboard machine's address
 #   AGENTS           the agents' addresses, separated by spaces
 #   SYSHEALTH_TOKEN  the token the server and the agents share (README, step 2)
+#   SYSHEALTH_VIEW_TOKEN
+#                    optional: a watch-only code for the server, for an audience
 #   KEY              SSH private key (default: syshealth-key.pem, as the README makes it)
 #
 # Each machine runs from ~/syshealth, as the README sets it up. The files sent
@@ -62,7 +64,11 @@ EOF
 
 if [ "$WHICH" != agents ]; then
   echo ">> Server. Restarting it empties the graphs: history is kept in memory only."
-  deploy_to "$SERVER" server.py server.log "export SYSHEALTH_TOKEN=$(printf %q "$TOKEN")"
+  settings="export SYSHEALTH_TOKEN=$(printf %q "$TOKEN")"
+  if [ -n "${SYSHEALTH_VIEW_TOKEN:-}" ]; then
+    settings="$settings SYSHEALTH_VIEW_TOKEN=$(printf %q "$SYSHEALTH_VIEW_TOKEN")"
+  fi
+  deploy_to "$SERVER" server.py server.log "$settings"
   echo ">> Dashboard: http://$SERVER:5000"
 fi
 if [ "$WHICH" != server ]; then
