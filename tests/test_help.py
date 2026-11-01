@@ -50,5 +50,20 @@ class HelpKeysTest(unittest.TestCase):
         self.assertGreater(len(_asked_for()), 50)
 
 
+class MemoryInUseTest(unittest.TestCase):
+    """Memory in use has its own place, next to the waiting it is not."""
+
+    def test_the_page_offers_it_on_the_tile_and_the_chart(self):
+        html = server.app.test_client().get("/").get_data(as_text=True)
+        self.assertIn('id="tile-mem"', html)
+        self.assertIn('data-metric="pressure"', html)
+        self.assertIn('data-metric="used"', html)
+
+    def test_the_cards_draw_it_and_the_load_line_drops_it(self):
+        drawn = _read("static", "js", "dashboard.js")
+        self.assertIn("term('mem-in-use', 'Memory in use')", drawn)
+        self.assertIn("machineLoad(latest, true)", drawn)
+
+
 if __name__ == "__main__":
     unittest.main()

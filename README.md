@@ -191,12 +191,16 @@ Open `http://YOUR_SERVER_IP:5000` in your browser.
   same band scale, so sizes compare at a glance. During a test, a size whose load
   the kernel killed never turns green again: the kill frees its memory, so once
   its reading drops below critical the card says **Ran out of memory** until the
-  test ends. Each card also has a **Machine load** line: CPU busy, the load
-  average and memory in use. A machine working flat out can still read 0%
-  waiting for memory, and the line shows it is busy, not idle
+  test ends. Each card also shows **Memory in use** as a bar in the size's own
+  colour, marked at 80% where most alarms sit, so a full machine that is still
+  HEALTHY is plain to see; and a **Machine load** line: CPU busy and the load
+  average. A machine working flat out can still read 0% waiting for memory, and
+  the line shows it is busy, not idle
 - Memory-pressure graph over time, auto-updating, with the one-minute average
   the state is judged on, and the Degraded (10%) and Critical (40%) lines drawn
-  in on every view — they are the same for every size
+  in on every view — they are the same for every size. **Show: Memory in use**
+  draws how full each machine is instead, 0–100% with the usual 80% alarm line,
+  to put the two side by side during a test
 - **Instance** toggle — one machine on its own, or every size overlaid to
   compare. Colour encodes instance size on a single light-to-dark ramp, so a
   line's shade tells you how big the box is

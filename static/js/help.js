@@ -40,6 +40,8 @@
           'The coloured bar: where that number sits. Green healthy, amber degraded, red critical; ' +
           'the white mark is this machine.',
           'The state: HEALTHY, DEGRADED or CRITICAL.',
+          'Memory in use: how full its RAM is, the number most dashboards show. The mark on ' +
+          'the bar is 80%, where they usually alarm.',
           'Machine load: how busy it is, for context.',
           'The small print: the last 10 seconds, the highest reading in the chosen range, and ' +
           'during a test what the test is holding.'
@@ -110,12 +112,24 @@
         [
           'CPU: the share of the last 5 seconds its processors were working.',
           'Load: the load average, as the uptime command shows it. Roughly how many programs ' +
-          'wanted a processor at once over the last minute, next to how many vCPUs it has.',
-          'Memory in use: how full the RAM is. This is the number most dashboards alarm on.'
+          'wanted a processor at once over the last minute, next to how many vCPUs it has.'
         ],
         'Busy is not the same as short of memory. A machine can be flat out on CPU and read 0% ' +
-        'waiting for memory, and a machine 90% full can be fine. Only the waiting figure says ' +
-        'whether it needs more RAM.'
+        'waiting for memory. Only the waiting figure says whether it needs more RAM.'
+      ]
+    },
+
+    'mem-in-use': {
+      title: 'Memory in use',
+      body: [
+        'How full this machine\'s RAM is, as the free command, CloudWatch and most dashboards ' +
+        'count it: all of it except what is still available to programs. The bar is in the ' +
+        'machine\'s own colour; the mark on it is 80%, where most memory alarms are set.',
+        'It is shown so you can compare it with the waiting figure above it. Full is not the ' +
+        'same as too small: during a load test a size can pass the 80% mark and stay HEALTHY, ' +
+        'because nothing has to wait yet. When programs do start to wait, the state changes, ' +
+        'whatever this bar says.',
+        'To see it over time, choose Show: Memory in use above the chart.'
       ]
     },
 
@@ -163,10 +177,21 @@
       title: 'Machine load',
       body: [
         'The big figure is CPU: the share of the last 5 seconds the processors were working. ' +
-        'The note under it gives the load average beside the number of vCPUs, and how full ' +
-        'the RAM is, which is the number most dashboards alarm on.',
-        'None of these says whether the machine is short of memory. The waiting figure does: ' +
-        'a busy machine can read 0%, and a full one can be fine.'
+        'The note under it gives the load average beside the number of vCPUs.',
+        'Neither says whether the machine is short of memory. The waiting figure does: a busy ' +
+        'machine can read 0%.'
+      ]
+    },
+
+    'tile-mem': {
+      title: 'Memory in use',
+      body: [
+        'How full this machine\'s RAM is, as the free command, CloudWatch and most dashboards ' +
+        'count it: all of it except what is still available to programs. The note gives the ' +
+        'same in MB or GB.',
+        'The mark on the bar is 80%, where most memory alarms are set. A machine past it can ' +
+        'still be fine: the waiting figure, the big number on the left, says whether programs ' +
+        'are held up, and the state goes by that.'
       ]
     },
 
@@ -280,9 +305,27 @@
           'With one machine selected, the filled area is the 10-second reading and the grey ' +
           'dashed line is the one-minute average its state is judged on.',
           'Point at the chart to read every machine at one moment. With the keyboard, select ' +
-          'the chart and use the left and right arrow keys.'
+          'the chart and use the left and right arrow keys.',
+          'Show: Memory in use draws how full each machine is instead, from 0 to 100%.'
         ];
       }
+    },
+
+    'chart-metric': {
+      title: 'Show',
+      body: [
+        'What the chart draws:',
+        [
+          'Waiting for memory: the share of time programs were held up waiting for memory. ' +
+          'The states are judged on this, so it is the one with the healthy, degraded and ' +
+          'critical lines.',
+          'Memory in use: how full each machine\'s RAM is, from 0 to 100%, as most dashboards ' +
+          'show it. The dashed line is 80%, where they usually alarm.'
+        ],
+        'Switch between them during a load test. The bigger sizes climb past 80% in use while ' +
+        'their waiting stays flat at 0: full, but not too small. An 80% alarm cannot tell ' +
+        'the two apart.'
+      ]
     },
 
     'col-time': {

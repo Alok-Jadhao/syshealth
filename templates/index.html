@@ -89,11 +89,13 @@
         </li>
         <li>
           <strong>Current state</strong> shows every machine as it is now, one card each,
-          from the smallest size to the biggest.
+          from the smallest size to the biggest, with how full its memory is under the
+          reading.
         </li>
         <li>
           <strong>The chart</strong> shows the same reading over time. <em>Range</em> picks
-          how far back; <em>Instance</em> picks one machine to look at closely.
+          how far back; <em>Instance</em> picks one machine to look at closely;
+          <em>Show</em> switches to memory in use, to see a full machine that is still fine.
         </li>
         <li>
           <strong>Load test</strong>, top right, puts the same memory load on every machine
@@ -359,6 +361,12 @@
             <p class="tile-note" id="tile-load-note">How busy the machine is.</p>
           </div>
           <div class="tile">
+            <p class="tile-label">Memory in use {{ help('tile-mem', 'Memory in use') }}</p>
+            <p class="tile-value" id="tile-mem">&mdash;</p>
+            <div id="tile-mem-bar"></div>
+            <p class="tile-note" id="tile-mem-note">How full the RAM is.</p>
+          </div>
+          <div class="tile">
             <p class="tile-label">Load test {{ help('tile-test', 'Load test') }}</p>
             <p class="tile-value" id="tile-test">&mdash;</p>
             <p class="tile-note" id="tile-test-note">No test running</p>
@@ -444,6 +452,15 @@
         <div class="segmented segmented-keyed" id="instance-control"
              role="radiogroup" aria-labelledby="instance-label"></div>
         {{ help('instance', 'Instance') }}
+      </div>
+
+      <div class="filter-group" role="group" aria-label="What the chart shows">
+        <span class="filter-label" id="metric-label">Show</span>
+        <div class="segmented" id="metric-control" role="radiogroup" aria-labelledby="metric-label">
+          <button type="button" role="radio" data-metric="pressure" aria-checked="true" class="is-selected">Waiting for memory</button>
+          <button type="button" role="radio" data-metric="used" aria-checked="false">Memory in use</button>
+        </div>
+        {{ help('chart-metric', 'Show') }}
       </div>
 
       <div class="filter-group filter-group-end" role="group" aria-label="View">

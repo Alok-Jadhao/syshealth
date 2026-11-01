@@ -869,6 +869,65 @@ main {
   font-weight: 600;
 }
 
+/* Memory in use: a 0-100% bar in the machine's own colour, with a mark at
+   the usual alarm line. */
+.cmp-mem {
+  margin: 10px 0 0;
+}
+
+.cmp-mem-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cmp-mem-value {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmp-mem-note {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.use-bar {
+  position: relative;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 4px;
+  background: var(--gridline);
+}
+
+.use-fill {
+  display: block;
+  height: 100%;
+  border-radius: 4px;
+  background: var(--series-psi);
+}
+
+.use-alarm {
+  position: absolute;
+  top: -3px;
+  width: 2px;
+  height: 14px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--text-secondary);
+}
+
+.tile .use-bar {
+  margin-top: 8px;
+}
+
 .cmp-load {
   margin: 8px 0 0;
   color: var(--text-secondary);

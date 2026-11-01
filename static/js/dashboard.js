@@ -59,6 +59,8 @@
     selected: ALL,
     rangeMinutes: 15,
     view: 'chart',
+    // What the chart draws: 'pressure' (waiting for memory) or 'used'.
+    metric: 'pressure',
     activeIndex: null,
     activeFromKeyboard: false,
     layout: null,
@@ -209,8 +211,9 @@
 
   // "CPU 98% · load 2.1 on 2 vCPUs · 80% of memory in use", from what the
   // sample has. A machine can be flat out and still read 0% waiting for
-  // memory; this says it is working, not idle.
-  function machineLoad(latest) {
+  // memory; this says it is working, not idle. Where memory in use has a bar
+  // of its own, skipMemory leaves it out here.
+  function machineLoad(latest, skipMemory) {
     var parts = [];
     var cpu = latest && latest.cpu;
     if (cpu && cpu.busy !== null) {
@@ -220,15 +223,62 @@
       parts.push('load ' + (Math.round(cpu.load1 * 10) / 10) +
         (cpu.vcpus ? ' on ' + cpu.vcpus + (cpu.vcpus === 1 ? ' vCPU' : ' vCPUs') : ''));
     }
-    if (latest && latest.memory) {
+    if (latest && latest.memory && !skipMemory) {
       parts.push(formatPct(latest.memory.used_pct) + '% of memory in use');
     }
     return parts.length ? parts.join(' · ') : null;
   }
 
-  var LOAD_TITLE = 'How busy the machine is: CPU over the last 5 s, the load average ' +
-    'as uptime shows it, and memory in use as most dashboards count it. Busy is not ' +
-    'short of memory: the % waiting for memory says whether it needs more RAM.';
+  var LOAD_TITLE = 'How busy the machine is: CPU over the last 5 s and the load average ' +
+    'as uptime shows it. Busy is not short of memory: the % waiting for memory says ' +
+    'whether it needs more RAM.';
+
+  // Where most dashboards put a memory alarm. Drawn on the bars and the chart
+  // so the demo's point shows by itself: a size can sit past it and be fine.
+  var USUAL_ALARM_PCT = 80;
+
+  // Memory in use as free, CloudWatch and most alarms count it: all of the
+  // RAM but what is still available (diagnose.py).
+  function memoryInUse(latest) {
+    var memory = latest && latest.memory;
+    var pct = memory ? num(memory.used_pct) : null;
+    if (pct === null) {
+      return null;
+    }
+    var total = num(memory.total_mb);
+    var available = num(memory.available_mb);
+    return {
+      pct: pct,
+      totalMb: total,
+      usedMb: total !== null && available !== null ? total - available : null
+    };
+  }
+
+  // A 0-100% bar in the machine's own colour, with a mark at the usual alarm.
+  function useBar(pct, color) {
+    var bar = el('div', 'use-bar');
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', formatPct(pct) + '% of memory in use');
+    bar.title = formatPct(pct) + '% in use. The mark is ' + USUAL_ALARM_PCT +
+      '%, where most dashboards would alarm.';
+    var fill = el('span', 'use-fill');
+    fill.style.width = Math.max(0, Math.min(100, pct)) + '%';
+    if (color) {
+      fill.style.background = color;
+    }
+    bar.appendChild(fill);
+    var mark = el('span', 'use-alarm');
+    mark.style.left = USUAL_ALARM_PCT + '%';
+    bar.appendChild(mark);
+    return bar;
+  }
+
+  // "1.7 GB of 1.9 GB", when the agent says both.
+  function usedOfTotal(use) {
+    return use.usedMb !== null && use.totalMb
+      ? formatMb(use.usedMb) + ' of ' + formatMb(use.totalMb)
+      : '';
+  }
 
   function normalizeThresholds(raw) {
     if (!raw || typeof raw !== 'object') {
@@ -674,11 +724,37 @@
 
   /* ---------- chart ---------- */
 
+  function usedPct(sample) {
+    return sample.memory ? num(sample.memory.used_pct) : null;
+  }
+
   // One drawing routine for both modes. Single instance: pressure plus its
   // rolling average and its thresholds. Several: one pressure line each.
+  // Memory in use is one line per machine either way: nothing is judged on
+  // it, so it has no one-minute line.
   function buildSeries(scoped, multi) {
     if (!scoped.length) {
       return [];
+    }
+    if (state.metric === 'used') {
+      return scoped
+        .map(function (inst) {
+          return {
+            key: inst.id + ':used',
+            name: multi ? inst.label : 'Memory in use',
+            color: inst.color,
+            points: inst.samples.filter(function (s) {
+              return usedPct(s) !== null;
+            }),
+            value: usedPct,
+            area: !multi,
+            dash: inst.dash,
+            primary: true
+          };
+        })
+        .filter(function (s) {
+          return s.points.length;
+        });
     }
     if (multi) {
       return scoped.map(function (inst) {
@@ -797,6 +873,8 @@
     var wrap = $('#plot-wrap');
     var empty = $('#empty-state');
     var multi = scoped.length > 1;
+    var used = state.metric === 'used';
+    var measure = used ? 'Memory in use' : 'Memory pressure';
     var series = buildSeries(scoped, multi);
     var steps = loadSteps(scoped);
 
@@ -808,7 +886,7 @@
     if (!series.length) {
       svg.setAttribute('hidden', '');
       empty.removeAttribute('hidden');
-      svg.setAttribute('aria-label', 'Memory pressure chart. No samples in the selected range.');
+      svg.setAttribute('aria-label', measure + ' chart. No samples in the selected range.');
       return;
     }
 
@@ -853,27 +931,35 @@
     // The thresholds are absolute - the same share of time on every size - so
     // they hold whether one instance is on screen or several.
     var th = thresholdsOf(scoped);
-    var thresholds = [
-      { value: th.degraded, label: 'Degraded from ' + th.degraded + '%',
-        shortLabel: 'Degraded ' + th.degraded + '%', state: 'degraded' },
-      { value: th.critical, label: 'Critical from ' + th.critical + '%',
-        shortLabel: 'Critical ' + th.critical + '%', state: 'critical' }
-    ];
+    var thresholds = used
+      ? [{ value: USUAL_ALARM_PCT, label: 'Usual alarm at ' + USUAL_ALARM_PCT + '% in use',
+           shortLabel: 'Alarm ' + USUAL_ALARM_PCT + '%', state: 'alarm' }]
+      : [
+        { value: th.degraded, label: 'Degraded from ' + th.degraded + '%',
+          shortLabel: 'Degraded ' + th.degraded + '%', state: 'degraded' },
+        { value: th.critical, label: 'Critical from ' + th.critical + '%',
+          shortLabel: 'Critical ' + th.critical + '%', state: 'critical' }
+      ];
 
     // The scale always reaches the degraded line, so a quiet machine reads as
     // what it is - flat, far below trouble - instead of having its noise blown
     // up to fill the plot. The critical line may widen it further, but never
     // past 2x the data: a far-away line must not squash the plot to the floor.
-    var scaleMax = Math.max(dataMax, th.degraded);
-    if (th.critical <= dataMax * 2) {
-      scaleMax = Math.max(scaleMax, th.critical);
+    // Memory in use is a share of a whole, so it always shows the whole.
+    var scale;
+    if (used) {
+      scale = { max: 100, step: 25, ticks: [0, 25, 50, 75, 100] };
+    } else {
+      var scaleMax = Math.max(dataMax, th.degraded);
+      if (th.critical <= dataMax * 2) {
+        scaleMax = Math.max(scaleMax, th.critical);
+      }
+      scale = niceScale(scaleMax);
     }
-
-    var scale = niceScale(scaleMax);
-    var digits = decimalsFor(scale.step);
+    var digits = used ? 0 : decimalsFor(scale.step);
     // Ticks stay as coarse as the step; single values keep two places so a
-    // small reading never rounds away to "0".
-    var valueDigits = Math.max(2, digits);
+    // small reading never rounds away to "0". Memory in use is never that small.
+    var valueDigits = used ? 1 : Math.max(2, digits);
     var span = t1 - t0;
 
     function x(t) {
@@ -917,7 +1003,7 @@
       fill: 'var(--text-muted)',
       'font-size': 11
     });
-    unit.textContent = '% of time waiting for memory';
+    unit.textContent = used ? '% of memory in use' : '% of time waiting for memory';
     gridGroup.appendChild(unit);
 
     // The bands, tinted faintly behind everything: where a line sits reads at
@@ -933,8 +1019,11 @@
         'fill-opacity': 0.07
       }), gridGroup.firstChild);
     }
-    band(th.degraded, th.critical, 'degraded');
-    band(th.critical, 100, 'critical');
+    // No bands on memory in use: how full it is is not a state.
+    if (!used) {
+      band(th.degraded, th.critical, 'degraded');
+      band(th.critical, 100, 'critical');
+    }
 
     // X axis: a handful of evenly spaced clock labels, never one per sample.
     // A zero-width span (one sample) gets exactly one, or they stack up.
@@ -1040,7 +1129,8 @@
 
         annotationLabels.appendChild(svgEl('circle', {
           cx: pad.left + 6, cy: labelY - 4, r: 3.5,
-          fill: t.state === 'critical' ? 'var(--status-critical)' : 'var(--status-warning)',
+          fill: t.state === 'critical' ? 'var(--status-critical)'
+            : t.state === 'alarm' ? 'var(--text-muted)' : 'var(--status-warning)',
           stroke: 'var(--surface-1)',
           'stroke-width': 1.5
         }));
@@ -1228,9 +1318,9 @@
     svg.setAttribute(
       'aria-label',
       (multi
-        ? 'Memory pressure over time for ' + series.length + ' instances: ' +
+        ? measure + ' over time for ' + series.length + ' instances: ' +
           series.map(function (s) { return s.name; }).join(', ') + '. '
-        : 'Memory pressure over time for ' + scoped[0].label + '. ') +
+        : measure + ' over time for ' + scoped[0].label + '. ') +
       stops.length + ' sample times from ' + formatClock(t0) + ' to ' + formatClock(t1) +
       ', values from ' + formatPsi(dataMin, valueDigits) + ' to ' +
       formatPsi(dataMax, valueDigits) +
@@ -1570,11 +1660,22 @@
     $('#tile-scan').textContent = latest ? formatCount(latest.scan) : '—';
     var cpu = latest && latest.cpu;
     $('#tile-load').textContent = cpu && cpu.busy !== null ? 'CPU ' + formatPct(cpu.busy) + '%' : '—';
-    var load = machineLoad(latest);
+    var load = machineLoad(latest, true);
     $('#tile-load-note').textContent = load
       ? load.replace(/^CPU [^·]*· /, '').replace(/^./, function (c) { return c.toUpperCase(); }) +
         '. Busy is not short of memory: the waiting figure says that.'
       : 'How busy the machine is. Needs an agent that sends it.';
+    var use = memoryInUse(latest);
+    $('#tile-mem').textContent = use ? formatPct(use.pct) + '%' : '—';
+    clear($('#tile-mem-bar'));
+    if (use) {
+      $('#tile-mem-bar').appendChild(useBar(use.pct, inst.color));
+    }
+    $('#tile-mem-note').textContent = use
+      ? (usedOfTotal(use) ? usedOfTotal(use) + '. ' : '') +
+        (use.pct >= USUAL_ALARM_PCT ? 'Past' : 'Under') + ' the ' + USUAL_ALARM_PCT +
+        '% most alarms use. Full is not short: the waiting figure says that.'
+      : 'How full the RAM is. Needs an agent that sends it.';
     renderApp(latest, th);
     renderWhy(latest);
   }
@@ -1754,7 +1855,23 @@
       }
       tile.appendChild(stateRow);
 
-      var load = machineLoad(latest);
+      // How full it is, big enough to compare with the waiting above it:
+      // during a test a size can pass the alarm mark and stay HEALTHY.
+      var use = memoryInUse(latest);
+      if (use) {
+        var useBox = el('div', 'cmp-mem');
+        var useHead = el('p', 'cmp-mem-head');
+        useHead.appendChild(term('mem-in-use', 'Memory in use'));
+        useHead.appendChild(el('span', 'cmp-mem-value', formatPct(use.pct) + '%'));
+        useBox.appendChild(useHead);
+        useBox.appendChild(useBar(use.pct, inst.color));
+        if (usedOfTotal(use)) {
+          useBox.appendChild(el('p', 'cmp-mem-note', usedOfTotal(use)));
+        }
+        tile.appendChild(useBox);
+      }
+
+      var load = machineLoad(latest, true);
       if (load) {
         var loadRow = el('p', 'cmp-load');
         var loadLabel = el('span', 'cmp-load-label');
@@ -1934,23 +2051,29 @@
       return acc + inst.samples.length;
     }, 0);
 
-    $('#card-title').textContent = multi
-      ? 'Memory pressure by instance'
-      : 'Memory pressure over time';
+    var used = state.metric === 'used';
+    $('#card-title').textContent = (used ? 'Memory in use' : 'Memory pressure') +
+      (multi ? ' by instance' : ' over time');
     var th = thresholdsOf(scoped);
     var peak = scoped.reduce(function (acc, inst) {
       return inst.samples.reduce(function (m, s) {
         return Math.max(m, s.psi);
       }, acc);
     }, 0);
-    var subtitle = multi
-      ? sampleCount + ' samples across ' + scoped.length +
-        ' instances, every one judged against the same lines.'
-      : (sampleCount ? sampleCount + ' samples, one every 5 s. ' : '') +
-        'The grey dashed line is the minute the state is judged on.';
-    if (sampleCount && peak < th.degraded) {
-      subtitle += ' Highest reading ' + formatPct(peak) + '%, under the ' +
-        th.degraded + '% degraded line.';
+    var subtitle;
+    if (used) {
+      subtitle = 'How full each machine\'s RAM is, as most dashboards count it. The dashed ' +
+        'line is where they usually alarm; the state still goes by the waiting.';
+    } else {
+      subtitle = multi
+        ? sampleCount + ' samples across ' + scoped.length +
+          ' instances, every one judged against the same lines.'
+        : (sampleCount ? sampleCount + ' samples, one every 5 s. ' : '') +
+          'The grey dashed line is the minute the state is judged on.';
+      if (sampleCount && peak < th.degraded) {
+        subtitle += ' Highest reading ' + formatPct(peak) + '%, under the ' +
+          th.degraded + '% degraded line.';
+      }
     }
     $('#chart-subtitle').textContent = subtitle;
 
@@ -3196,6 +3319,12 @@
 
     wireSegmented('#view-control', function (button) {
       setView(button.getAttribute('data-view'));
+    });
+
+    wireSegmented('#metric-control', function (button) {
+      state.metric = button.getAttribute('data-metric');
+      state.activeIndex = null;
+      renderAll();
     });
 
     // Rebuilt on every poll, so the handler lives on the container.
