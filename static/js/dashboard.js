@@ -3275,6 +3275,12 @@
       } catch (err) {
         return;
       }
+      // The preset is not worked out from users, so fold the users box (its
+      // sums would describe another test) and drop a plan still on its way.
+      // Opening the box again plans from its fields again.
+      window.clearTimeout(usersTimer);
+      usersSeq++;
+      $('#lt-users').open = false;
       applySpec(spec);
     });
     $('#lt-users').addEventListener('toggle', function () {
