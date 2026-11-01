@@ -71,6 +71,20 @@ THREE_STATES_SPEC = {"mode": "variable", "pattern": "ramp", "need_mb": 1600,
                      "workers": 12, "background_cpu": True, "swap_mb": 2048}
 
 
+# "How many people use it?" turned into a test: the dashboard's "Plan it from
+# your users" and `cli.py run --users`. How much memory a user takes is the
+# app's own, so it is asked for, never assumed: the app with nobody on it, and
+# what each user at the same moment adds (measure it once: the app's memory at
+# a quiet time and at a busy one, divided by the users between them). The
+# busiest moment becomes "your app at its busiest", a normal day the ramp's
+# start, and the ramp goes on to twice the busiest, as the default test does,
+# to show how much room each size has. These defaults come to the default
+# test's 1600 MB at its busiest, and are shown in the form, not hidden.
+USERS_DEFAULTS = {"normal_users": 200, "busiest_users": 650, "app_mb": 300, "mb_per_user": 2}
+USERS_TEST = {"steps": 6, "step_sec": 60, "workers": 2}
+MAX_USERS = 10000000
+
+
 class PlanError(ValueError):
     """A spec or plan that cannot be run. The message is shown to the user."""
 
@@ -89,6 +103,71 @@ def _int(spec, key, low, high, label):
     if not low <= value <= high:
         raise PlanError("%s must be between %d and %d." % (label, low, high))
     return value
+
+
+def _decimal(spec, key, low, high, label):
+    """A number that may have a fraction, such as 0.5 MB per user."""
+    raw = spec.get(key)
+    try:
+        if isinstance(raw, bool):
+            raise ValueError
+        value = float(raw)
+    except (TypeError, ValueError):
+        raise PlanError("%s must be a number." % label)
+    if not low < value <= high:
+        raise PlanError("%s must be more than %g and at most %g." % (label, low, high))
+    return value
+
+
+def users_plan(spec):
+    """The test for so many users at once: {"spec", "need_mb", "lines"}.
+
+    `spec` gives normal_users, busiest_users (users at the same moment, not
+    per day), app_mb and mb_per_user. The returned spec is a ramp build_plan
+    takes as it is; the lines say how it was worked out.
+    """
+    if not isinstance(spec, dict):
+        raise PlanError("Expected a JSON object.")
+    normal = _int(spec, "normal_users", 0, MAX_USERS, "Users at once on a normal day")
+    busiest = _int(spec, "busiest_users", 1, MAX_USERS, "Users at once at the busiest")
+    if busiest < normal:
+        raise PlanError("The busiest moment must have at least as many users as a normal day.")
+    app = _int(spec, "app_mb", 0, LIMITS["max_mb"], "Your app with no users")
+    per_user = _decimal(spec, "mb_per_user", 0, 1024, "Memory per user")
+
+    need = int(round(app + busiest * per_user))
+    low = int(round(app + normal * per_user))
+    if need < 1:
+        raise PlanError("That comes to under 1 MB at the busiest. Check the memory per user.")
+    if need >= LIMITS["max_mb"]:
+        raise PlanError("That comes to %s at the busiest, more than a test can hold (%s). "
+                        "Check the memory per user." % (format_mb(need), format_mb(LIMITS["max_mb"])))
+    high = min(2 * need, LIMITS["max_mb"])
+
+    # The default test's shape, unless asked for another (cli.py --steps).
+    shape = dict(USERS_TEST)
+    if spec.get("steps") not in (None, ""):
+        shape["steps"] = _int(spec, "steps", LIMITS["min_steps"], LIMITS["max_steps"], "Steps")
+    if spec.get("step_sec") not in (None, ""):
+        shape["step_sec"] = _int(spec, "step_sec", LIMITS["min_phase_sec"],
+                                 LIMITS["max_phase_sec"], "Seconds per step")
+
+    plan = {"mode": "variable", "pattern": "ramp", "need_mb": need, "low_mb": low,
+            "high_mb": high, "background_cpu": False, "swap_mb": 0}
+    plan.update(shape)
+
+    def sum_for(users):
+        return "%d MB + %s users × %s MB" % (app, "{:,}".format(users), "%g" % per_user)
+
+    lines = [
+        "Busiest: %s = %d MB. Every size is judged against this, plus the spare you keep."
+        % (sum_for(busiest), need),
+        "Normal day: %s = %d MB. The ramp starts here." % (sum_for(normal), low),
+        "The ramp climbs to %d MB%s in %d steps of %d s, to show how much room each size has "
+        "past your busiest." % (high, ", twice the busiest," if high == 2 * need else "",
+                                shape["steps"], shape["step_sec"]),
+    ]
+    return {"spec": plan, "need_mb": need, "lines": lines}
 
 
 def _flag(spec, key):

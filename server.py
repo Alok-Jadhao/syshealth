@@ -111,7 +111,8 @@ def require_token():
 @app.route("/")
 def home():
     # The preset behind "Show all three states", from the one place it is kept.
-    return render_template("index.html", three_states=json.dumps(loadtest.THREE_STATES_SPEC))
+    return render_template("index.html", three_states=json.dumps(loadtest.THREE_STATES_SPEC),
+                           users=loadtest.USERS_DEFAULTS)
 
 
 @app.route("/access", methods=["GET"])
@@ -392,6 +393,15 @@ def load_plan():
     except loadtest.PlanError as exc:
         return jsonify({"error": str(exc)}), 400
     return jsonify({"plan": plan, "commands": loadtest.commands(plan)})
+
+
+@app.route("/users-plan", methods=["POST"])
+def users_plan():
+    """The test for so many users at once, and how it was worked out. Runs nothing."""
+    try:
+        return jsonify(loadtest.users_plan(request.get_json(silent=True, force=True)))
+    except loadtest.PlanError as exc:
+        return jsonify({"error": str(exc)}), 400
 
 
 def _running_tests(now):

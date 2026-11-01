@@ -2518,6 +2518,57 @@
     previewSoon();
   }
 
+  // "Plan it from your users": the server works out the test (users-plan,
+  // loadtest.users_plan), the form takes it as if typed, and the sums show
+  // how. Only typing in these four fields re-plans, so a form changed by hand
+  // afterwards stays as it was changed.
+  var USERS_FIELDS = ['normal_users', 'busiest_users', 'app_mb', 'mb_per_user'];
+  var usersTimer = null;
+  var usersSeq = 0;
+
+  function planFromUsersSoon() {
+    window.clearTimeout(usersTimer);
+    usersTimer = window.setTimeout(planFromUsers, 250);
+  }
+
+  function planFromUsers() {
+    var form = $('#lt-form');
+    var seq = ++usersSeq;
+    var asked = {};
+    USERS_FIELDS.forEach(function (name) {
+      asked[name] = form.elements[name].value.trim();
+    });
+
+    function failed(message) {
+      clear($('#lt-users-sums'));
+      $('#lt-users-error').textContent = message;
+      $('#lt-users-error').hidden = false;
+    }
+
+    postJson('users-plan', asked)
+      .then(function (result) {
+        if (seq !== usersSeq) {
+          return;
+        }
+        if (!result.ok) {
+          failed(result.data.error || 'This cannot be worked out.');
+          return;
+        }
+        $('#lt-users-error').hidden = true;
+        var sums = $('#lt-users-sums');
+        clear(sums);
+        result.data.lines.forEach(function (line) {
+          sums.appendChild(el('li', null, line));
+        });
+        applySpec(result.data.spec);
+      })
+      .catch(function () {
+        if (seq === usersSeq) {
+          failed('Could not reach the server to work this out.');
+        }
+      });
+  }
+
   function syncFormMode() {
     var variable = state.testMode === 'variable';
     Array.prototype.forEach.call(document.querySelectorAll('.lt-fields[data-for]'), function (node) {
@@ -3224,6 +3275,16 @@
         return;
       }
       applySpec(spec);
+    });
+    $('#lt-users').addEventListener('toggle', function () {
+      if (this.open) {
+        planFromUsers();
+      }
+    });
+    $('#lt-users').addEventListener('input', function (event) {
+      if (USERS_FIELDS.indexOf(event.target.name) >= 0) {
+        planFromUsersSoon();
+      }
     });
     wireToken();
 

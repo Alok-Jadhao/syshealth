@@ -160,6 +160,7 @@ and the dashboard's own port, which works from this machine whatever DNS says.
 
 ```bash
 ./aws.sh test --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
+./aws.sh test --users 200:650 --app-mb 300 --mb-per-user 2
 ```
 
 Runs a load test on the fleet and prints which size to buy. It takes the same
@@ -318,6 +319,7 @@ minutes by default). `aws.sh up` uses it.
 python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 python3 cli.py run --peak 2250 --for 360 --workers 12 --background --swap 2048
 python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
+python3 cli.py run --users 200:650 --app-mb 300 --mb-per-user 2
 ```
 
 Starts the same load on every machine at once, shows its progress, then prints
@@ -331,6 +333,11 @@ the verdict. Ctrl-C stops the test everywhere.
 | `--ramp LOW:HIGH` | Climb from LOW to HIGH | `--steps` levels (default 6), `--step-sec` each (default 60) |
 | `--wave LOW:HIGH` | Climb, then come back down | the same |
 | `--bursts LOW:HIGH` | LOW, then HIGH, `--steps` times over | the same |
+| `--users NORMAL:BUSIEST` | Worked out from users at the same moment, as the dashboard's **Plan it from your users** does: a ramp from a normal day's memory to twice the busiest's, judged against the busiest. It prints the sums first | `--app-mb` and `--mb-per-user` (both needed), `--steps`, `--step-sec`; it sets `--need` itself |
+
+With `--users`: `--app-mb MB` is your app's memory with no users, and
+`--mb-per-user MB` what each user at the same moment adds (fractions are fine).
+Measure it once: (memory at a busy moment − memory with no users) ÷ users then.
 
 **Your app, and the answer:**
 

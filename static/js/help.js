@@ -383,7 +383,8 @@
         'take the memory and keep using it, as a busy app would, for the time you set, then ' +
         'frees it.',
         [
-          'Fill in the form, or press Show all three states.',
+          'Fill in the form, press Show all three states, or open Plan it from your users ' +
+          'and say how many people use your app.',
           'Check the plan drawn under the form: it shows the load against each machine\'s RAM ' +
           'before anything runs.',
           'Press Start. The cards and the chart show each machine react, and the results build ' +
@@ -447,6 +448,65 @@
           (spec ? ' (' + Math.round(spec.steps * spec.step_sec / 60) + ' minutes or so)' : '') + '.'
         ];
       }
+    },
+
+    'users-plan': {
+      title: 'Plan it from your users',
+      body: [
+        'Most people know their app by its users, not its megabytes. Say how many use it at ' +
+        'the same moment, on a normal day and at the busiest, and how much memory each one ' +
+        'adds, and the test is worked out for you:',
+        [
+          'Your app at its busiest = the app with no users + busiest users × memory per user. ' +
+          'Every size is judged against this, plus the spare you keep.',
+          'The ramp starts at a normal day: the app + normal users × memory per user.',
+          'It climbs to twice the busiest, in 6 steps of a minute, as the default test does, ' +
+          'so the results show how much room each size has past your peak.'
+        ],
+        'The sums appear under the fields, and the form below fills in as you type. Change ' +
+        'anything in the form afterwards if you like; Start runs what the form says.',
+        'Memory per user is your app\'s own: SysHealth never guesses it. The 2 MB filled in ' +
+        'is an example that comes to the default 1600 MB test; measure your app\'s before ' +
+        'you trust the verdict.'
+      ]
+    },
+    normal_users: {
+      title: 'Users at once, normal day',
+      body: [
+        'How many people are using the app at the same moment on an ordinary day. Not how ' +
+        'many visit in a day: memory follows who is on it right now.',
+        'From a daily number: users a day × minutes each one stays ÷ the minutes the app is ' +
+        'busy in a day. 10,000 a day staying 6 minutes, over 12 busy hours, is 10,000 × 6 ÷ ' +
+        '720, about 83 at once.',
+        'The test starts its ramp at the memory this many users take.'
+      ]
+    },
+    busiest_users: {
+      title: 'Users at once, busiest',
+      body: [
+        'The most people you expect on the app at the same moment: the peak hour, a launch, a ' +
+        'sale. Worked out the same way as a normal day, from the busiest day.',
+        'The memory this many users take is what every size is judged against.'
+      ]
+    },
+    app_mb: {
+      title: 'Your app with no users',
+      body: [
+        'Your app\'s memory with nobody using it: the runtime, the code and whatever it loads ' +
+        'at start. Read it at a quiet moment from ps, docker stats or systemctl status, or ' +
+        'from the Your app tile when the agent watches the app (SYSHEALTH_APP).'
+      ]
+    },
+    mb_per_user: {
+      title: 'Memory per user',
+      body: [
+        'How much more memory the app takes for each user on it at the same moment: their ' +
+        'session, caches, the work for their requests. It depends entirely on the app.',
+        'Measure it once: the app\'s memory at a busy moment, minus its memory with no users, ' +
+        'divided by the users on it then. 700 MB with 200 users and 300 MB with none is ' +
+        '(700 − 300) ÷ 200 = 2 MB each.',
+        'Fractions are fine: a light API may add 0.2 MB a user.'
+      ]
     },
 
     memory_mb: {

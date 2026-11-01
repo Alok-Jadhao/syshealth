@@ -4,6 +4,7 @@
     python3 cli.py status
     python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
     python3 cli.py run --peak 1600 --for 120 --expect t3.medium
+    python3 cli.py run --users 200:650 --app-mb 300 --mb-per-user 2
     python3 cli.py report --need 1200 --margin 30 --cpu 0.5
     python3 cli.py wait --count 4
 
@@ -147,12 +148,40 @@ def print_report(report, out=sys.stdout):
         print(report["prices"]["note"], file=out)
 
 
+def users_spec(args):
+    """--users NORMAL:BUSIEST, worked out as the dashboard does (loadtest.users_plan)."""
+    try:
+        normal, busiest = [int(x) for x in args.users.split(":")]
+    except ValueError:
+        raise CliError("--users takes NORMAL:BUSIEST, users at the same moment, e.g. 200:650.")
+    if args.app_mb is None or args.mb_per_user is None:
+        raise CliError("--users needs --app-mb (your app with no users) and --mb-per-user "
+                       "(what each user at the same moment adds), both in MB.")
+    if args.need:
+        raise CliError("--users works out --need itself: leave --need out.")
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import loadtest
+    try:
+        planned = loadtest.users_plan({
+            "normal_users": normal, "busiest_users": busiest, "app_mb": args.app_mb,
+            "mb_per_user": args.mb_per_user, "steps": args.steps, "step_sec": args.step_sec})
+    except loadtest.PlanError as exc:
+        raise CliError(str(exc))
+    log = sys.stderr if getattr(args, "json", False) else sys.stdout
+    for line in planned["lines"]:
+        print(line, file=log)
+    return dict(planned["spec"])
+
+
 def spec_from(args):
     """The /run-stress body for the options given."""
-    shapes = [s for s in ("peak", "ramp", "wave", "bursts") if getattr(args, s)]
+    # getattr with a default: callers that build their own args may predate --users.
+    shapes = [s for s in ("peak", "ramp", "wave", "bursts", "users") if getattr(args, s, None)]
     if len(shapes) != 1:
-        raise CliError("Give exactly one of --peak, --ramp, --wave or --bursts.")
-    if args.peak:
+        raise CliError("Give exactly one of --peak, --ramp, --wave, --bursts or --users.")
+    if "users" in shapes:
+        spec = users_spec(args)
+    elif args.peak:
         spec = {"mode": "peak", "memory_mb": args.peak, "duration_sec": args.duration}
     else:
         pattern = shapes[0]
@@ -332,6 +361,12 @@ def main(argv=None):
     shape.add_argument("--ramp", metavar="LOW:HIGH", help="climb from LOW to HIGH MB")
     shape.add_argument("--wave", metavar="LOW:HIGH", help="climb, then come back down")
     shape.add_argument("--bursts", metavar="LOW:HIGH", help="alternate a base load and a spike")
+    shape.add_argument("--users", metavar="NORMAL:BUSIEST",
+                       help="users at the same moment on a normal day and at the busiest; "
+                            "works out the ramp and --need (with --app-mb and --mb-per-user)")
+    run.add_argument("--app-mb", type=int, metavar="MB", help="--users: your app with no users")
+    run.add_argument("--mb-per-user", type=float, metavar="MB",
+                     help="--users: what each user at the same moment adds")
     run.add_argument("--for", dest="duration", type=int, default=60, help="peak: seconds (default 60)")
     run.add_argument("--steps", type=int, default=6, help="variable: levels (default 6)")
     run.add_argument("--step-sec", type=int, default=60, help="variable: seconds each (default 60)")

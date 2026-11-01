@@ -1309,6 +1309,48 @@ main {
   flex: 1 1 260px;
 }
 
+/* Plan it from your users: folded away until asked for, then the sums it
+   worked out, under the four fields. */
+.lt-users {
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.lt-users summary {
+  cursor: pointer;
+  width: max-content;
+  max-width: 100%;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.lt-users[open] summary {
+  margin-bottom: 8px;
+}
+
+.lt-users > .field-note {
+  margin: 0 0 12px;
+}
+
+.lt-users-sums {
+  display: grid;
+  gap: 4px;
+  margin: 12px 0 0;
+  padding: 10px 12px 10px 28px;
+  border-radius: 8px;
+  background: var(--hover-wash);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lt-users-sums:empty {
+  display: none;
+}
+
 .input-unit input:focus-visible {
   outline: 2px solid var(--series-psi);
   outline-offset: 1px;

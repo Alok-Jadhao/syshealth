@@ -100,7 +100,8 @@
         <li>
           <strong>Load test</strong>, top right, puts the same memory load on every machine
           at once, so you can watch the small ones struggle first.
-          <em>Show all three states</em> fills in a test that shows all three at the same moment.
+          <em>Show all three states</em> fills in a test that shows all three at the same moment;
+          <em>Plan it from your users</em> works one out from how many people use your app.
         </li>
         <li>
           <strong>Which size to choose</strong> appears under the test form once a test has
@@ -139,6 +140,38 @@
           <span class="field-note">Fills in the test that showed CRITICAL, DEGRADED and HEALTHY at the
             same moment on a real t3.micro to t3.large fleet, the same on every size.</span>
         </div>
+
+        <!-- Users in, test out (loadtest.users_plan). Typing here fills the
+             form below and shows the sums, so nothing is decided out of sight. -->
+        <details class="lt-users" id="lt-users">
+          <summary>Plan it from your users {{ help('users-plan', 'Plan it from your users') }}</summary>
+          <p class="field-note">How many people use your app at the same moment, and how much
+            memory each one adds. The test below is worked out from these as you type.</p>
+          <div class="lt-fields">
+            <label class="field">
+              <span class="field-label">Users at once, normal day {{ help('normal_users', 'Users at once, normal day') }}</span>
+              <span class="input-unit"><input type="number" name="normal_users" value="{{ users.normal_users }}" min="0" step="1" inputmode="numeric"><span>users</span></span>
+              <span class="field-note">At the same moment, not per day</span>
+            </label>
+            <label class="field">
+              <span class="field-label">Users at once, busiest {{ help('busiest_users', 'Users at once, busiest') }}</span>
+              <span class="input-unit"><input type="number" name="busiest_users" value="{{ users.busiest_users }}" min="1" step="1" inputmode="numeric"><span>users</span></span>
+              <span class="field-note">Your peak hour, a launch, a sale</span>
+            </label>
+            <label class="field">
+              <span class="field-label">Your app with no users {{ help('app_mb', 'Your app with no users') }}</span>
+              <span class="input-unit"><input type="number" name="app_mb" value="{{ users.app_mb }}" min="0" max="16384" step="1" inputmode="numeric"><span>MB</span></span>
+              <span class="field-note">Its memory at a quiet moment</span>
+            </label>
+            <label class="field">
+              <span class="field-label">Memory per user {{ help('mb_per_user', 'Memory per user') }}</span>
+              <span class="input-unit"><input type="number" name="mb_per_user" value="{{ users.mb_per_user }}" min="0" max="1024" step="0.1" inputmode="decimal"><span>MB</span></span>
+              <span class="field-note">What each user at once adds. Measure yours</span>
+            </label>
+          </div>
+          <ul class="lt-users-sums" id="lt-users-sums" aria-live="polite"></ul>
+          <p class="lt-error" id="lt-users-error" role="alert" hidden></p>
+        </details>
 
         <div class="lt-fields" data-for="peak">
           <label class="field">

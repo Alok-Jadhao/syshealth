@@ -537,7 +537,7 @@ every option, and what it does step by step.
 | `./aws.sh token` | Print the token and the watch-only code, with a link for each |
 | `./aws.sh domain NAME --profile NAME` | Once: serve the dashboard at `https://NAME` on every `up` |
 | `./aws.sh status` | What is running, and what it has cost |
-| `./aws.sh test --need MB --ramp LOW:HIGH ...` | Run a load test and print which size to buy |
+| `./aws.sh test --need MB --ramp LOW:HIGH ...` | Run a load test and print which size to buy (or `--users NORMAL:BUSIEST --app-mb MB --mb-per-user MB`) |
 | `./aws.sh ssh SIZE` | A shell on one machine (`dashboard`, `t3.micro`, ...) |
 | `./aws.sh deploy` | Send your local changes to the fleet |
 | `./aws.sh shortcuts --profile NAME` | Two desktop icons: SysHealth demo on, SysHealth demo off |
@@ -640,6 +640,7 @@ reported as each machine's idle reference, but states no longer depend on it.
 | GET | `/series` | Every instance's recent history — what the graph reads; `?since=` only what is new |
 | GET | `/summary` | Each instance now and over the last hour in a few KB, with its app's measured peak memory and average CPU |
 | POST | `/load-plan` | Preview a load test: the plan and the commands, without running it |
+| POST | `/users-plan` | Work a test out from users: `normal_users`, `busiest_users` (at the same moment), `app_mb`, `mb_per_user`. Returns the test and the sums; runs nothing |
 | POST | `/run-stress` | Run a load test on all online agents that take tests (token; no body: the old default test) |
 | POST | `/stop-stress` | Stop the running load test on all online agents (token) |
 | GET | `/report` | Which size to buy, from the last test: `?need_mb=` your app's peak, `?margin=` % spare, `?cpu=` its average vCPUs, `?test_id=` an earlier test |
@@ -683,6 +684,26 @@ moment.
 | **Variable load: ramp up** | Your app's peak, from / to (MB), steps, seconds per step | How much can each size hold before it slows down? |
 | **Variable load: up and down** | Same | A day of traffic: does each size recover when load drops? |
 | **Variable load: bursts** | Base / spike (MB), how many, seconds each | How does each size take short spikes? |
+
+**Plan it from your users.** Most teams know their app by its users, not its
+megabytes. Open this box at the top of the form and give four numbers: users at
+the same moment on a normal day and at the busiest, your app's memory with no
+users, and what each user adds. The form fills in as you type, with the sums
+under the fields:
+
+- your app at its busiest = app + busiest users × memory per user (every size
+  is judged against it);
+- the ramp starts at a normal day, app + normal users × memory per user;
+- and climbs to twice the busiest in 6 steps of a minute, as the default test
+  does, to show the room each size has past the peak.
+
+Memory per user is the app's own, so it is asked for, never assumed: measure
+it once, as (memory at a busy moment − memory with no users) ÷ users then. The
+example filled in (300 MB, 2 MB a user, 200 and 650 users) comes to the default
+1600 MB test. Users per day are not users at once: 10,000 a day who stay 6
+minutes, over 12 busy hours, are about 10,000 × 6 ÷ 720 ≈ 83 at once. The
+same sums are behind `cli.py run --users` and `POST /users-plan`, in
+`loadtest.users_plan`.
 
 Before anything runs, the panel previews the plan as a chart, with each
 instance's RAM drawn on it. It shows the peak as a share of that RAM ("168% of
@@ -814,6 +835,7 @@ python3 cli.py run --need 1600 --ramp 200:3200 --steps 6 --step-sec 60
 python3 cli.py report --need 1200 --margin 30 --cpu 0.5  # the last test, judged again
 python3 cli.py run --peak 1600 --for 120 --expect t3.medium --save report.json
 python3 cli.py run --ramp 2100:2400 --steps 5 --step-sec 75 --workers 12 --background --swap 2048
+python3 cli.py run --users 200:650 --app-mb 300 --mb-per-user 2   # from users at once, as the dashboard does
 ```
 
 `run` starts the test on every instance, shows its progress, then prints the
@@ -1068,7 +1090,7 @@ syshealth/
 ├── syshealth.py       # Agent: collector, analyzer, control server, push client
 ├── analyzer.py        # Sliding-window PSI classifier, thresholds at the top
 ├── collector.py       # Reads /proc/pressure/memory (some + full), /proc/vmstat, /proc/meminfo
-├── loadtest.py        # Load-test plans: built from the form, checked by the agent
+├── loadtest.py        # Load-test plans: built from the form or from users, checked by the agent
 ├── rightsize.py       # What a test says each size holds, and which size to buy
 ├── diagnose.py        # Where the memory is, the likely cause, growing processes
 ├── prometheus.py      # GET /metrics in Prometheus's text format
