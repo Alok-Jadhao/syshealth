@@ -135,7 +135,7 @@ A = story.append
 E = story.extend
 
 A(para("SysHealth — live demo runbook", TITLE))
-A(para("Four EC2 sizes, one load, one verdict in dollars. "
+A(para("Five EC2 sizes, one load, one verdict in dollars. "
        "Every command runs from <font face='Courier'>~/syshealth</font>.", SUB))
 
 # ---- 1
@@ -167,34 +167,38 @@ A(para("2 &nbsp; Forty-five minutes before", H1))
 A(para("The fleet needs about five minutes to boot and calibrate, and you want one rehearsal "
        "run in hand before anyone is watching.", BODY))
 A(para("Bring the fleet up", H2))
-A(para("Double-click <b>SysHealth demo on</b> on the desktop, or:", BODY))
-E(code("./aws.sh up --profile hackathon"))
-A(para("It names the account, region and cost: about $0.25 an hour with the addresses, disks "
-       "and load balancer. The command asks first; the icon does not.", SMALL))
-A(expect("<font face='Courier'>4 of 4 instances reporting</font>, then "
+A(para("Double-click <b>SysHealth demo on</b> on the desktop; it makes the two QR slides "
+       "too. Or by hand, then the slides:", BODY))
+E(code("./aws.sh up --profile hackathon\n"
+       "~/syshealth-audience-qr.sh && ~/syshealth-audience-qr.sh --start"))
+A(para("It names the account, region and cost: about $0.37 an hour, $0.44 with disks, "
+       "addresses and load balancer (14 of the account's 16 vCPUs). The command asks first; "
+       "the icon does not.", SMALL))
+A(expect("<font face='Courier'>All five sizes reporting</font>, then "
          "<font face='Courier'>https://syshealth.aryangorde.com</font> opens in the browser, "
          "signed in."))
-A(para("Get the codes from the terminal", H2))
+A(para("The codes and the slides", H2))
 A(para("The page shows nothing without a code; both are new on every "
-       "<font face='Courier'>up</font>.", BODY))
+       "<font face='Courier'>up</font>, so make the slides after it, never before.", BODY))
 E(code("./aws.sh token          # --raw: the token alone, for a script"))
 A(expect("<font face='Courier'>Server token</font>: yours, already in the browser; it alone "
-         "starts and stops tests. <font face='Courier'>Watch-only code</font>: for the room, "
-         "on the slide under the address; it shows everything and starts nothing."))
-A(para("Without aws.sh: <font face='Courier'>cd terraform &amp;&amp; TF_WORKSPACE=fleet "
-       "terraform output -raw token</font> (or <font face='Courier'>view_token</font>).",
+         "starts and stops tests. <font face='Courier'>Watch-only code</font>: for the room; "
+         "it shows everything and starts nothing."))
+A(para("Slides in <font face='Courier'>~/syshealth-audience/</font>: "
+       "<font face='Courier'>slide.html</font> (watch-only) and "
+       "<font face='Courier'>slide-start.html</font> (the token, step 7). Scan both now.",
        SMALL))
 E(code("./aws.sh status"))
-A(expect("four sizes, <font face='Courier'>ONLINE yes</font>, all HEALTHY."))
+A(expect("five sizes, <font face='Courier'>ONLINE yes</font>, all HEALTHY."))
 A(para("Rehearse once, from the dashboard", H2))
-A(para("Press <b>Load test</b>, choose <b>Variable load</b> and <b>Ramp up</b>. The defaults "
-       "are the test: your app at its busiest 1600 MB, from 200 to 3200 MB, 6 steps of 60 "
-       "seconds. Press <b>Start on 4 instances</b>. Every <b>?</b> on the page explains its part, "
-       "and <b>Guide</b>, top right, the whole page.", BODY))
-A(para("About seven minutes: it proves the chain works and leaves a result on the page in "
-       "case the live run fails. Step 5b planned? Run it too (six minutes). Then wait two "
-       "minutes for the lines to fall to zero. Closed the tab, or the page asks for a code? "
-       "<font face='Courier'>./aws.sh open</font> opens it again, signed in.", SMALL))
+A(para("<b>Load test</b>, open <b>Plan it from your users</b>, keep its defaults (200 users "
+       "at once normally, 650 at the busiest, app 300 MB, 2 MB each): the form fills with a "
+       "ramp from 700 MB to 3.1 GB, 6 steps of 60 s, judged against 1600 MB. <b>Start on 5 "
+       "instances</b>. Every <b>?</b> explains its part; <b>Guide</b>, top right, the page.",
+       BODY))
+A(para("Seven minutes: it proves the chain and leaves a result in case the live run fails. "
+       "Note its verdict (step 5). Step 5b planned? Run it too. Then wait two minutes for the "
+       "lines to fall. Asked for a code? <font face='Courier'>./aws.sh open</font>.", SMALL))
 
 A(PageBreak())
 
@@ -202,19 +206,21 @@ A(PageBreak())
 A(para("3 &nbsp; The demo, about twelve minutes", H1))
 
 A(para("Step 0 — Let the room follow along (optional)", H2))
-A(para("Show the slide: the address and the watch-only code.", BODY))
-E(say("Open syshealth.aryangorde.com on your phone and type the code on the slide. You "
-      "see what I see, live. Only I can start a test."))
+A(para("Open <font face='Courier'>~/syshealth-audience/slide.html</font> full screen (F11): "
+       "the QR, the address and the watch-only code.", BODY))
+E(say("Scan this, or open syshealth.aryangorde.com and type the code. You see what I see, "
+      "live. Only I can start a test."))
 
 A(para("Step 1 — The problem (one minute, no clicking)", H2))
 E(say("Teams pick an instance size by guessing, or by an alarm at 80 percent of memory in "
       "use. One way they overpay, the other way the app slows down and nobody knows why. "
-      "SysHealth measures it: the same load on four sizes at the same moment, then the "
+      "SysHealth measures it: the same load on five sizes at the same moment, then the "
       "cheapest size that holds your app, in dollars a month."))
 
 A(para("Step 2 — The idle fleet", H2))
-A(para("Four cards, all HEALTHY, a flat chart. Open <b>What the number means</b>. Asked "
-       "about any part? Its <b>?</b> explains it.", BODY))
+A(para("Five cards, all HEALTHY, a flat chart. Each card's bar is memory in use, marked at "
+       "80%. Open <b>What the number means</b>. Asked about any part? Its <b>?</b> explains "
+       "it.", BODY))
 E(say("This number comes from the Linux kernel itself: the share of time programs waited "
       "for memory. Not how full memory is. Under 10 percent is healthy, 10 to 40 is degraded, "
       "40 or more is critical, and so is the whole machine stalling 10 percent of the time. "
@@ -222,50 +228,55 @@ E(say("This number comes from the Linux kernel itself: the share of time program
       "low-memory killer, systemd-oomd and Meta's oomd. A state only changes after it has "
       "held for 15 seconds, so one spike is not a failure."))
 
-A(para("Step 3 — Start the ramp", H2))
-A(para("<b>Load test</b>, <b>Variable load</b>, <b>Ramp up</b>, the same defaults, "
-       "<b>Start on 4 instances</b>.", BODY))
-E(say("Same load, same moment, four machines. It climbs from 200 megabytes to 3.2 "
-      "gigabytes over six minutes. Watch which ones feel it."))
+A(para("Step 3 — Plan the test from users, and start it", H2))
+A(para("<b>Load test</b>, open <b>Plan it from your users</b>, keep the defaults. The sums "
+       "under it show the working; the form below fills itself. <b>Start on 5 instances</b>.",
+       BODY))
+E(say("Nobody knows their app in megabytes; they know how many people use it at once. 650 "
+      "at the busiest, 2 megabytes each, on top of 300 for the app: 1.6 gigabytes. The test "
+      "starts at a normal day, 700 megabytes, and climbs to twice the busiest, on five "
+      "machines at the same moment. Watch which ones feel it."))
 
 A(para("Step 4 — Talk through the six minutes", H2))
 E(table([
     ["Minute", "Load", "Point at"],
-    ["1–2", "800 MB", Paragraph("<b>t3.micro turns CRITICAL</b>: 13% waiting at 97% in use. "
-                                "Click it for <b>Where the memory is</b> and the likely cause.", TCELL)],
-    ["2–3", "1.4 GB", Paragraph("The kernel <b>kills the test on the micro</b>; as its reading "
-                                "falls, its card says RAN OUT OF MEMORY. <b>t3.small is 93% in use "
-                                "and still HEALTHY.</b>", TCELL)],
-    ["3–4", "2 GB", Paragraph("<b>t3.small turns CRITICAL</b>: 22% waiting.", TCELL)],
-    ["4–6", "2.6–3.2 GB", Paragraph("<b>t3.medium reaches 95% in use and stays HEALTHY.</b> "
-                                    "t3.large is flat.", TCELL)],
+    ["0–1", "700 MB", Paragraph("t3.micro is 98% in use: nearly full, barely waiting.", TCELL)],
+    ["1–2", "1.2 GB", Paragraph("The kernel <b>kills the test on the micro</b>; as its reading "
+                                "falls, its card says RAN OUT OF MEMORY. Set <b>Show</b> to "
+                                "<b>Memory in use</b>: <b>t3.small reaches 82% in use, past "
+                                "the alarm line, and stays HEALTHY.</b>", TCELL)],
+    ["2–3", "1.7 GB", Paragraph("<b>Show</b> back to <b>Waiting for memory</b>. t3.small is "
+                                "99% in use and starts to wait. Click it for <b>Where the "
+                                "memory is</b>.", TCELL)],
+    ["3–4", "2.1 GB", Paragraph("The kernel <b>kills the test on the small</b>. t3.medium is "
+                                "69% in use, 0% waiting.", TCELL)],
+    ["4–6", "2.6–3.1 GB", Paragraph("<b>t3.medium fills up and stays HEALTHY</b> (95% in use "
+                                    "at 3.1 GB). t3.large and t3.xlarge are flat.", TCELL)],
 ], [16 * mm, 22 * mm, 127 * mm]))
-A(para("These are the 19 October numbers; the 22 October run matched them within a few "
-       "points. States judge a "
-       "one-minute average, so a card turns up to a minute after its step begins. Use the "
-       "quiet stretches for the Prometheus question (section 4).", SMALL))
-E(say("At the 1.4 gigabyte step: look at the small. 93 percent of its memory is in use, so an "
-      "80 percent alarm would be ringing. But nothing is waiting, so nothing is slowed down. "
-      "That is the difference between memory in use and memory pressure."))
-A(para("Each card's <b>Machine load</b> line shows CPU near 100% during the test: the medium "
-       "is working flat out with 0% waiting.", SMALL))
+A(para("Minutes 0–4 are the 1 November run, 4–6 the 19 October run at the same loads. States "
+       "judge a one-minute average, so a card turns up to a minute after its step begins. Use "
+       "the quiet stretches for the Prometheus question (section 4).", SMALL))
+E(say("At 1.2 gigabytes, look at the small. 82 percent of its memory is in use, past the line "
+      "where the usual alarm rings. But nothing is waiting, so nothing is slowed down. That is "
+      "the difference between memory in use and memory pressure."))
 
 A(para("Step 5 — The verdict", H2))
-A(para("Open <b>Load test</b>. <b>Which size to choose</b> leads the results.", BODY))
+A(para("Open <b>Load test</b>. <b>Which size to choose</b> leads the results. Quote the "
+       "rehearsal's numbers if they differ from these.", BODY))
 E(say("Choose t3.medium, 32 dollars 70 a month. The small would save 16 dollars 35, but it "
-      "holds only about 1.6 gigabytes, 5 percent more than the app needs, and we asked for 25. "
-      "The large costs twice as much for room this app does not use. A sizing decision made "
-      "from measurement, and said in money. Its last line says what it did not test: the same "
-      "4 gigabytes on Graviton or AMD, t4g.medium and t3a.medium, for about half. Those go in "
-      "the next run before anyone switches."))
+      "was full at 1.7 gigabytes and killed at 2.1, and we asked for 25 percent spare over "
+      "1.6. The large and the xlarge cost two and four times as much for room this app does "
+      "not use. A sizing decision made from measurement, and said in money. Its last line says "
+      "what it did not test: the same 4 gigabytes on Graviton or AMD, t4g.medium and "
+      "t3a.medium, for about half. Those go in the next run before anyone switches."))
 A(para("Then point at the <b>Pressure at each load level</b> chart: where a size's line "
        "crosses the degraded line is the most it can hold. Change <b>Your app at its busiest</b> "
        "or <b>Keep spare</b> and the answer is worked out again, without another test.", BODY))
 
 A(para("Step 5b — All three states at once (optional, six minutes)", H2))
 A(para("<b>Load test</b>, <b>Show all three states</b>, <b>Start</b>. From about 1½ minutes to the "
-       "end: micro CRITICAL, small DEGRADED, medium and large HEALTHY. Not red by step 3? Show the "
-       "screenshot. (2.1 GB twice: rounding.)", BODY))
+       "end: micro CRITICAL, small DEGRADED, medium, large and xlarge HEALTHY. Not red by step "
+       "3? Show the screenshot. (2.1 GB twice: rounding.)", BODY))
 E(say("A real server has other work that keeps running, so the small is slowed but still "
       "working: degraded. The medium and large are at 100 percent CPU, and nothing waits."))
 
@@ -278,6 +289,13 @@ E(say("The same test runs from the command line, so it can gate a build: it fail
       "size the app needs has changed. Prometheus can scrape everything at /metrics, and an "
       "AI agent can run the experiment through an MCP server."))
 
+A(para("Step 7 — Let the room run one (optional, after the verdict)", H2))
+A(para("Open <font face='Courier'>slide-start.html</font>. Its QR holds the server token: "
+       "whoever scans it can start a test, or stop one. One runs at a time; the token dies at "
+       "<font face='Courier'>./aws.sh down</font>.", BODY))
+E(say("Scan this one and run your own: Load test, Plan it from your users, your app's "
+      "numbers, Start."))
+
 # ---- 4
 A(para("4 &nbsp; Questions you will get", H1))
 
@@ -288,6 +306,15 @@ E(say("It is not coping, it failed. The load did not fit in its memory and swap,
 A(para("Proof, live, if they want it: the kernel's own record, with times that match the chart.",
        SMALL))
 E(code("./aws.sh ssh t3.micro 'sudo journalctl -k --since \"20 min ago\" | grep -i killed'"))
+
+A(para("“Where does 2 MB per user come from?”", H2))
+E(say("It is the one number you measure: your app's memory with no users, and with a known "
+      "number at once; the difference over the users. The plan turns users into megabytes; "
+      "the test measures everything after that."))
+
+A(para("“What if my app needs more than the biggest size?”", H2))
+E(say("The fleet goes up to t3.xlarge, 16 gigabytes. If none fits, the verdict says so "
+      "rather than guess, and the same command tests bigger sizes with --types."))
 
 A(para("“Why did nothing show DEGRADED?”", H2))
 E(say("The test load is the only work on the box, so when it waits, everything waits, and "
@@ -315,7 +342,7 @@ E(say("It does not say whether it hurts. At 95 percent in use the medium was sta
 A(para("“A peak test said t3.small. Why does the ramp say t3.medium?”", H2))
 E(say("A peak test only asks whether each size can hold the app at 1.6 gigabytes, not how "
       "much more it could take. The ramp measures the room left, and with 25 percent spare "
-      "asked for, the small's 5 percent rules it out."))
+      "asked for, the small does not have it."))
 
 A(para("“Could this run in production?”", H2))
 E(say("The measurement side, yes: Prometheus can scrape it today, seeing it needs a code, "
@@ -350,6 +377,12 @@ A(expect("<font face='Courier'>0 added, 3 changed, 0 destroyed</font>. Still not
          "phone hotspot and run it again."))
 A(para("A phone on the laptop's Wi-Fi can open it too; on mobile data it is blocked.", SMALL))
 
+A(para("The page stops updating in the middle of a test", H2))
+A(para("Seen once, 1 November, cause unknown. Reload once. Still nothing: open the address "
+       "on a phone on mobile data, which tells your network from the server. The test runs on "
+       "the machines either way; the rehearsal's result is your fallback. Then look:", BODY))
+E(code("./aws.sh ssh dashboard 'uptime; free -m; sudo journalctl -u syshealth-server -n 30'"))
+
 A(para("A size is missing", H2))
 E(code("""./aws.sh status                      # which sizes are not reporting
 ./aws.sh ssh t3.small 'sudo tail -30 /var/log/syshealth-bootstrap.log'
@@ -377,7 +410,7 @@ curl -s -H "Authorization: Bearer $SYSHEALTH_TOKEN" "$URL/series?limit=720" \\
   > demo-evidence-$(date +%F).json
 ./aws.sh down && ./aws.sh status      # or double-click SysHealth demo off"""))
 A(expect("<font face='Courier'>Nothing is up</font>: billing has stopped. Until then the "
-         "fleet bills about $0.25 an hour, about $6 a day."))
+         "fleet bills about $0.44 an hour, about $10.50 a day."))
 
 # ------------------------------------------------------------------ build ---
 

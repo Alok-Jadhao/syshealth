@@ -126,7 +126,7 @@ for i in $(seq 1 40); do
 done
 
 echo
-echo "Not all four are reporting after 10 minutes. Current state:"
+echo "Not every size is reporting after 10 minutes. Current state:"
 echo
 ./check.sh
 exit 1
