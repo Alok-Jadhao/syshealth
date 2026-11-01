@@ -201,7 +201,7 @@ class DemoThreeStatesTest(unittest.TestCase):
             states = {name: m.sample(start + t)["state"] for name, m in machines.items()}
             seen.append(states)
         want = {"t3.micro": "CRITICAL", "t3.small": "DEGRADED",
-                "t3.medium": "HEALTHY", "t3.large": "HEALTHY"}
+                "t3.medium": "HEALTHY", "t3.large": "HEALTHY", "t3.xlarge": "HEALTHY"}
         self.assertGreaterEqual(sum(s == want for s in seen), 20)   # 100 s or more
         self.assertFalse(any(m.killed_phases for m in machines.values()))
 

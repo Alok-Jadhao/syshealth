@@ -36,7 +36,7 @@ slow.
 |---|---|---|
 | See what it does, in two minutes, on your laptop | [Preview it locally](#preview-it-locally) | Python 3 and Flask. No AWS |
 | Know what the dashboard shows | [Dashboard](#dashboard), or press **Guide** and any **?** on the page | Nothing |
-| Find the right size on real AWS machines | [Setup from zero](#setup-from-zero), then [Run it on AWS](#run-it-on-aws-one-command-up-one-down) | An AWS account; about $0.19 an hour while the fleet is up |
+| Find the right size on real AWS machines | [Setup from zero](#setup-from-zero), then [Run it on AWS](#run-it-on-aws-one-command-up-one-down) | An AWS account; about $0.37 an hour while the fleet is up |
 | Show it live, at your own address, with the audience following on their phones | [Your own address, for a live demo](#your-own-address-for-a-live-demo) | A domain you own; $3.65 a month, plus about $0.03 an hour while the fleet is up |
 | Use machines you set up yourself | [Quick Start (manual)](#quick-start-manual) | Linux machines you can reach over SSH |
 | Look up a command or a setting | [docs/commands.md](docs/commands.md), [Settings](#settings) | Nothing |
@@ -47,7 +47,7 @@ slow.
 ### Try it
 
 ```bash
-npm run dev                   # a simulated four-size fleet at http://127.0.0.1:5000, no AWS
+npm run dev                   # a simulated five-size fleet at http://127.0.0.1:5000, no AWS
 terraform/rightsize.sh --need 1600 --ramp 200:3200 --steps 6 --step-sec 60   # the real run: build, test, report, destroy
 ./aws.sh up --profile NAME    # or keep a fleet up, and test from its dashboard
 ```
@@ -295,8 +295,10 @@ and firewall ([below](#run-it-on-aws-one-command-up-one-down)). It also uses
 `curl`, `ssh` and `ssh-keygen`, which Ubuntu has already.
 
 **What it costs.** The default fleet, a t3.small dashboard and a t3.micro,
-small, medium and large, is about $0.19 an hour in Mumbai ($0.22 with disks and
-addresses), and nothing once `./aws.sh down` has run. One test with
+small, medium, large and xlarge, is about $0.37 an hour in Mumbai ($0.41 with
+disks and addresses), and nothing once `./aws.sh down` has run. Most of that is
+the t3.xlarge ($0.18 an hour); leave it out with `--types` when the app is
+small. One test with
 `terraform/rightsize.sh`, which builds, tests and destroys, costs a few cents.
 `./aws.sh status` shows what is running and what it has cost so far.
 
@@ -305,7 +307,7 @@ addresses), and nothing once `./aws.sh down` has run. One test with
 ## Preview it locally
 
 The dashboard only says anything once several differently-sized machines are
-pushing, so there is a demo mode that simulates a four-size fleet — no AWS, no
+pushing, so there is a demo mode that simulates a five-size fleet — no AWS, no
 agents, nothing to configure:
 
 ```bash
@@ -349,7 +351,7 @@ and Terraform. Then:
 ```
 
 `up` first says which account and region it will use and what that costs
-(about $0.19 an hour in Mumbai, the default region), and asks before going on.
+(about $0.37 an hour in Mumbai, the default region), and asks before going on.
 It builds the fleet, waits until every size is reporting (four to eight
 minutes), prints the dashboard's address, its token and its watch-only code,
 and opens the dashboard in your browser already signed in: the token rides
@@ -1061,6 +1063,7 @@ Names follow Prometheus conventions (bytes, 0–1 ratios); "waiting" and
 |---|---|---|
 | `pip install` says `externally-managed-environment` | Debian and Ubuntu keep pip out of the system Python | `sudo apt install python3-flask python3-requests`, or a virtualenv ([Setup](#2-python-and-its-packages)) |
 | `npm run dev` stops at once: the address is in use | Something else has port 5000 | Stop it, or the earlier `npm run dev` |
+| `./aws.sh up` fails with `VcpuLimitExceeded` | The default fleet needs 14 vCPUs (t3.xlarge has 4, the rest 2 each), and new AWS accounts may allow only 16 or fewer at once, counting anything else running | Leave a size out with `--types`, or ask AWS for more under Service Quotas → EC2 → Running On-Demand Standard instances |
 | `./aws.sh up`: "the AWS credentials ... do not work" | No keys for that profile, or wrong ones | `aws configure --profile NAME`, then `aws sts get-caller-identity --profile NAME` |
 | `terraform` or `aws`: command not found | Not installed | [Setup, step 3](#3-for-aws-the-aws-cli-terraform-and-an-access-key) |
 | The dashboard stopped loading | Your network changed, and the firewall lets in only the old address | `./aws.sh up` again: it moves the firewall and keeps the machines |
@@ -1099,7 +1102,7 @@ syshealth/
 ├── pricing.py         # What each size costs, from data/prices.json; burstable CPU credits
 ├── instance.py        # Instance type, id and region via IMDSv2, so sizes can be compared
 ├── reporter.py        # Local stdout logging
-├── dev.py             # Local preview: simulated four-size fleet (npm run dev)
+├── dev.py             # Local preview: simulated five-size fleet (npm run dev)
 ├── aws.sh             # The fleet on AWS: up, down, status, token, test, ssh, deploy, domain
 ├── deploy.sh          # Deploy to EC2 instances you launched by hand
 ├── templates/

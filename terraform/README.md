@@ -1,8 +1,9 @@
-# Terraform — dashboard plus four t3 sizes
+# Terraform — dashboard plus five t3 sizes
 
 One `terraform apply` brings up the whole thing: a dashboard server and
-`t3.micro`, `t3.small`, `t3.medium`, `t3.large`, each running the same agent and
-reporting in. Nothing to configure on the instances by hand.
+`t3.micro`, `t3.small`, `t3.medium`, `t3.large`, `t3.xlarge`, each running the same
+agent and reporting in. The t3.xlarge (16 GB, 4 vCPUs) is there for apps too big
+for the other four. Nothing to configure on the instances by hand.
 
 Defaults to `ap-south-1` (Mumbai). Override with `region` in `terraform.tfvars`.
 
@@ -86,8 +87,8 @@ terraform output -raw view_token
 
 Open **Load test**, enter the memory your app needs, and start it.
 
-A peak test holds one level; a variable test ramps, waves or bursts between two. The four
-are asked at the same moment, in parallel, because staggered starts would pull
+A peak test holds one level; a variable test ramps, waves or bursts between two. All the
+sizes are asked at the same moment, in parallel, because staggered starts would pull
 the curves apart for a reason that has nothing to do with instance size. When it
 finishes, the panel says which size to choose and what it costs a month.
 
@@ -115,9 +116,9 @@ The exit status is `cli.py`'s: 0 when a size was recommended, 2 when none fits,
 
 ## Costs
 
-Five on-demand instances bill by the second and **keep billing until you destroy
-them**. Order of magnitude in a cheaper region: roughly US$0.20 an hour for the
-set, so about $5 a day or $15 for a three-day run — check the [EC2 pricing
+Six on-demand instances bill by the second and **keep billing until you destroy
+them**. Order of magnitude in a cheaper region: roughly US$0.40 an hour for the
+set, so about $10 a day or $30 for a three-day run — check the [EC2 pricing
 page](https://aws.amazon.com/ec2/pricing/on-demand/) for your region rather than
 trusting that number.
 

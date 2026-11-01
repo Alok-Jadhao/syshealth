@@ -6,7 +6,7 @@
 #   ./rightsize.sh --peak 1600 --for 120 --types "t3.small t3a.medium m7i.large"
 #
 # Options of its own:
-#   --types "A B C"   sizes to compare (default: t3.micro t3.small t3.medium t3.large);
+#   --types "A B C"   sizes to compare (default: t3.micro t3.small t3.medium t3.large t3.xlarge);
 #                     x86 only, as the image main.tf uses is amd64
 #   --keep            leave the fleet up afterwards (it keeps billing)
 #   --yes             do not ask before creating instances

@@ -107,7 +107,7 @@ class ProtocolTest(McpCase):
         result = self.tool("fleet_status")
         self.assertNotIn("structuredContent", result)
         # The same data is in the second text block either way.
-        self.assertEqual(len(json.loads(result["content"][1]["text"])["instances"]), 4)
+        self.assertEqual(len(json.loads(result["content"][1]["text"])["instances"]), 5)  # the five demo sizes
 
 
 class ToolTest(McpCase):
@@ -119,7 +119,7 @@ class ToolTest(McpCase):
         for size in ("t3.micro", "t3.small", "t3.medium", "t3.large"):
             self.assertIn(size, text)
         self.assertIn("app node-app.service over the last hour", text)
-        self.assertIn("4 of 4 machine(s) online and accepting load tests", text)
+        self.assertIn("5 of 5 machine(s) online and accepting load tests", text)
         large = self.tool("fleet_status", hostname="t3.large")
         self.assertIn("biggest:", large["content"][0]["text"])
         self.assertEqual(len(large["structuredContent"]["instances"]), 1)

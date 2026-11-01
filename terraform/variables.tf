@@ -12,7 +12,7 @@ variable "region" {
 variable "instance_types" {
   description = "The sizes to compare. Each becomes one instance running the same agent."
   type        = list(string)
-  default     = ["t3.micro", "t3.small", "t3.medium", "t3.large"]
+  default     = ["t3.micro", "t3.small", "t3.medium", "t3.large", "t3.xlarge"]
 }
 
 variable "server_instance_type" {

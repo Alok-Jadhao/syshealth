@@ -23,7 +23,7 @@ Start with the README's [Setup from zero](../README.md#setup-from-zero).
 
 ### `npm run dev`
 
-The dashboard with a simulated four-size fleet, at <http://127.0.0.1:5000>.
+The dashboard with a simulated five-size fleet, at <http://127.0.0.1:5000>.
 Nothing to configure, no AWS, no token.
 
 - **Needs:** Python 3.10+ with Flask and requests (README, [Setup from
@@ -75,14 +75,14 @@ in your browser, already signed in.
 |---|---|---|
 | `--profile NAME` | The AWS CLI profile to use | `$AWS_PROFILE`, else your default keys |
 | `--region NAME` | Where to build | `ap-south-1` (Mumbai), or `region` in `terraform/terraform.tfvars` |
-| `--types "A B C"` | The sizes to compare. x86 only (the image is amd64) | `"t3.micro t3.small t3.medium t3.large"` |
+| `--types "A B C"` | The sizes to compare. x86 only (the image is amd64) | `"t3.micro t3.small t3.medium t3.large t3.xlarge"` |
 | `--yes` | Do not ask before building | asks |
 | `--no-open` | Do not open the browser at the end | opens it |
 
 What happens, in order:
 
 1. It names the account and region, says what the fleet costs an hour (about
-   $0.19 for the default five machines in Mumbai), and asks before going on.
+   $0.37 for the default six machines in Mumbai), and asks before going on.
 2. It makes an SSH key at `~/.ssh/syshealth_ed25519` if there is none, and a
    firewall that lets in only this machine's public IPv4 address.
 3. Terraform builds the machines (about a minute). Each one installs SysHealth

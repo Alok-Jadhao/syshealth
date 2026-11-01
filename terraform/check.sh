@@ -51,7 +51,7 @@ fi
 python3 - "$SERIES" <<'PY'
 import json, sys
 
-want = ["t3.micro", "t3.small", "t3.medium", "t3.large"]
+want = ["t3.micro", "t3.small", "t3.medium", "t3.large", "t3.xlarge"]
 found = json.loads(sys.argv[1])["instances"]
 
 print()
@@ -75,7 +75,7 @@ for i in found:
 missing = [s for s in want if s not in seen]
 print()
 if not missing:
-    print("All four sizes reporting. Open 'Load test' on the dashboard.")
+    print("All five sizes reporting. Open 'Load test' on the dashboard.")
     sys.exit(0)
 
 print("Not reporting: " + ", ".join(missing))

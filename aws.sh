@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SysHealth on AWS: one command up, one command down.
 #
-#   ./aws.sh up --profile NAME     build the fleet (a dashboard and four sizes)
+#   ./aws.sh up --profile NAME     build the fleet (a dashboard and five sizes)
 #                                  and wait until every size is reporting
 #   ./aws.sh down                  destroy all of it
 #
@@ -32,7 +32,7 @@
 # Options for up:
 #   --profile NAME   AWS CLI profile (default: $AWS_PROFILE, else your default keys)
 #   --region NAME    default ap-south-1, or region in terraform/terraform.tfvars
-#   --types "A B C"  sizes to compare (default: t3.micro t3.small t3.medium t3.large);
+#   --types "A B C"  sizes to compare (default: t3.micro t3.small t3.medium t3.large t3.xlarge);
 #                    x86 only, as the image main.tf uses is amd64
 #   --yes            do not ask first (down takes it too)
 #   --no-open        do not open the dashboard in a browser at the end

@@ -43,8 +43,8 @@ class PrometheusTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.headers["Content-Type"].startswith("text/plain; version=0.0.4"))
         found = families(response.get_data(as_text=True))
-        self.assertEqual(len(found["syshealth_up"]), 4)
-        self.assertEqual(len(found["syshealth_state"]), 12)  # three states for each of four
+        self.assertEqual(len(found["syshealth_up"]), 5)  # the five demo sizes
+        self.assertEqual(len(found["syshealth_state"]), 15)  # three states for each of five
         recommended = [l for l in found["syshealth_recommended"] if l.endswith(" 1")]
         self.assertEqual(len(recommended), 1)
         self.assertIn('instance_type="t3.medium"', recommended[0])
@@ -74,7 +74,7 @@ class SeriesTest(unittest.TestCase):
         cut = newest - 12  # the last two or three samples of each
         delta = client.get("/series?since=%r" % cut).get_json()
         self.assertEqual(delta["since"], cut)
-        self.assertEqual(len(delta["instances"]), 4)
+        self.assertEqual(len(delta["instances"]), 5)  # the five demo sizes
         for inst in delta["instances"]:
             self.assertTrue(1 <= len(inst["samples"]) <= 3)
             self.assertTrue(all(s["received_ts"] > cut for s in inst["samples"]))

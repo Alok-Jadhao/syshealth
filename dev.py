@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Local preview: the dashboard with a simulated four-instance fleet.
+"""Local preview: the dashboard with a simulated five-instance fleet.
 
 `npm run dev` runs this. It exists because the dashboard only says anything
-once several differently-sized machines are pushing, and standing up four EC2
+once several differently-sized machines are pushing, and standing up five EC2
 instances to look at a chart is a poor trade.
 
 The PSI numbers here are SYNTHETIC. Everything downstream of them is not: each
@@ -61,13 +61,15 @@ PROFILES = [
     ("t3.small",    2048,   0.05,     0.06),
     ("t3.medium",   4096,   0.02,     0.03),
     ("t3.large",    8192,   0.012,    0.015),
+    ("t3.xlarge",   16384,  0.008,    0.010),
 ]
 
 # What Ubuntu, the agent and the page cache it cannot give back hold on to.
 OS_OVERHEAD_MB = 350
 
-# Every size above has 2 vCPUs. Ubuntu and the agent keep about 0.03 of one busy.
-VCPUS = 2
+# Every size above has 2 vCPUs but the xlarge, which has 4. Ubuntu and the
+# agent keep about 0.03 of one busy.
+VCPUS = {"t3.xlarge": 4}
 OS_VCPU = 0.03
 
 # Where the simulated fleet "runs", which picks the prices the report uses:
@@ -136,6 +138,7 @@ class FakeMachine:
         # What MemTotal reports: a little under the nominal size, as on EC2.
         self.mem_total_mb = int(ram_mb * 0.93)
         self.idle = idle
+        self.vcpus = VCPUS.get(instance_type, 2)
 
         self.analyzer = Analyzer()
         # Bypass baseline.json: each machine gets the baseline its own idle
@@ -279,16 +282,16 @@ class FakeMachine:
         reclaim, smoothed over a minute as the kernel does.
         """
         if background:
-            busy_vcpu = VCPUS * self.rng.uniform(0.97, 1.0)
+            busy_vcpu = self.vcpus * self.rng.uniform(0.97, 1.0)
         elif holding:
-            busy_vcpu = min(holding["plan"]["workers"], VCPUS) * self.rng.uniform(0.9, 0.98)
+            busy_vcpu = min(holding["plan"]["workers"], self.vcpus) * self.rng.uniform(0.9, 0.98)
         else:
             busy_vcpu = app["cpu_vcpu"] + OS_VCPU
-        busy_vcpu = min(float(VCPUS), busy_vcpu)
+        busy_vcpu = min(float(self.vcpus), busy_vcpu)
         target = busy_vcpu + some / 50.0
         self.load1 += (target - self.load1) * (1 - math.exp(-TICK_SEC / 60.0))
-        return {"busy_pct": round(100.0 * busy_vcpu / VCPUS, 1),
-                "load1": round(self.load1, 2), "vcpus": VCPUS}
+        return {"busy_pct": round(100.0 * busy_vcpu / self.vcpus, 1),
+                "load1": round(self.load1, 2), "vcpus": self.vcpus}
 
     def memory_for(self, demand_mb, held_by):
         """Synthetic /proc/meminfo (kB) and top processes for holding `demand_mb`.

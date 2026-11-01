@@ -5,7 +5,7 @@ SYSHEALTH_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # The key the fleet is built with when terraform.tfvars names no key pair of
 # its own. Made on first use; only the public half goes to AWS.
 SSH_KEY=${SYSHEALTH_SSH_KEY:-$HOME/.ssh/syshealth_ed25519}
-DEFAULT_TYPES="t3.micro t3.small t3.medium t3.large"
+DEFAULT_TYPES="t3.micro t3.small t3.medium t3.large t3.xlarge"
 
 die() { echo "${0##*/}: $*" >&2; exit 1; }
 
@@ -64,7 +64,7 @@ ensure_ssh_key() {
   echo "Made an SSH key for the fleet: $SSH_KEY"
 }
 
-# "about $0.19 an hour" for these sizes and the dashboard's, at list price.
+# "about $0.37 an hour" for these sizes and the dashboard's, at list price.
 fleet_cost() {
   (cd "$SYSHEALTH_ROOT" && python3 -c '
 import sys, pricing

@@ -49,7 +49,8 @@
     micro: 'var(--size-micro)',
     small: 'var(--size-small)',
     medium: 'var(--size-medium)',
-    large: 'var(--size-large)'
+    large: 'var(--size-large)',
+    xlarge: 'var(--size-xlarge)'
   };
 
   var ALL = 'all';

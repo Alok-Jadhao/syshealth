@@ -143,8 +143,9 @@ class RecommendationTest(unittest.TestCase):
             self.assertIsNone(row["dropped"], row["instance_type"])
 
     def test_nothing_big_enough(self):
-        spec = dict(RAMP, low_mb=2000, high_mb=12000, steps=4)
-        report = run_test(spec, need=9000)
+        # Past what even the t3.xlarge's 16 GB holds.
+        spec = dict(RAMP, low_mb=4000, high_mb=16000, steps=4)
+        report = run_test(spec, need=15500)
         self.assertIsNone(report["recommendation"]["pick"])
         self.assertIn("None of the tested sizes", report["recommendation"]["headline"])
 
@@ -288,7 +289,8 @@ class CpuTest(unittest.TestCase):
 
     def test_no_size_with_the_cpu(self):
         run_test(RAMP)
-        report = rightsize.report(server.snapshot(), None, 1600, 25, server.tests, cpu_vcpu=1.7)
+        # More than the t3.xlarge's 4 vCPUs, the most any size has.
+        report = rightsize.report(server.snapshot(), None, 1600, 25, server.tests, cpu_vcpu=4.5)
         rec = report["recommendation"]
         self.assertIsNone(rec["pick"])
         self.assertIn("has the CPU", rec["headline"])

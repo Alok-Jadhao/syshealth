@@ -27,6 +27,7 @@
   --size-small: #5598e7;
   --size-medium: #2a78d6;
   --size-large: #184f95;
+  --size-xlarge: #0c2f5f;
   /* Off the size ladder (an agent that never reported a type). A separate hue,
      not another step, so it never reads as a size. */
   --size-other: #eb6834;
@@ -70,10 +71,11 @@
     --series-psi: #3987e5;
     --series-avg: #898781;
 
-    --size-micro: #b7d3f6;
-    --size-small: #6da7ec;
-    --size-medium: #2a78d6;
-    --size-large: #184f95;
+    --size-micro: #c9dff9;
+    --size-small: #8dbbf0;
+    --size-medium: #4a90e2;
+    --size-large: #2a6fc9;
+    --size-xlarge: #1d55a3;
     --size-other: #d95926;
 
     --load-track: #c3c2b7;
@@ -105,10 +107,11 @@
   --series-psi: #3987e5;
   --series-avg: #898781;
 
-  --size-micro: #b7d3f6;
-  --size-small: #6da7ec;
-  --size-medium: #2a78d6;
-  --size-large: #184f95;
+  --size-micro: #c9dff9;
+  --size-small: #8dbbf0;
+  --size-medium: #4a90e2;
+  --size-large: #2a6fc9;
+  --size-xlarge: #1d55a3;
   --size-other: #d95926;
 
   --load-track: #c3c2b7;
